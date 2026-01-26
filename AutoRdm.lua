@@ -370,7 +370,7 @@ end
 ------------------------------------------------------------
 local function find_lowest_hp_target()
     local party = windower.ffxi.get_party()
-    if not party then return nil end
+    if not party then return '<me>' end
     
     local lowest_hpp = 100
     local lowest_target = nil
@@ -378,9 +378,9 @@ local function find_lowest_hp_target()
     -- Check all party members (p0-p5)
     for i = 0, 5 do
         local member = party['p' .. i]
-        if member and member.mob then
+        if member and member.mob and member.mob.status == 0 then
             local hpp = member.mob.hpp or 100
-            if hpp < lowest_hpp then
+            if hpp > 0 and hpp < lowest_hpp then
                 lowest_hpp = hpp
                 lowest_target = '<p' .. i .. '>'
             end
@@ -2345,7 +2345,7 @@ windower.register_event('addon command', function(...)
         enqueue_special_spell(spells.dispel.name, spells.dispel.recast_id, '<t>', false)
 
     elseif cmd == 'cure4' then
-        enqueue_special_spell(spells.cure4.name, spells.cure4.recast_id, '<t>', false)
+        enqueue_special_spell(spells.cure4.name, spells.cure4.recast_id, nil, false)
 
     elseif cmd == 'debug' then
         log(('debug: ws_active=%s buffset=%s step=%d waiting=%s special=%s retry_active=%s mbset.active=%s mbcount=%d last_props=%s target_id=%s suspend_buffs=%s'):format(
