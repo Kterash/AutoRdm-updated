@@ -378,9 +378,11 @@ local function find_lowest_hp_target()
     -- Check all party members (p0-p5)
     for i = 0, 5 do
         local member = party['p' .. i]
-        if member and member.mob and member.mob.status == 0 then
+        if member and member.mob then
+            local status = member.mob.status or 0
             local hpp = member.mob.hpp or 100
-            if hpp > 0 and hpp < lowest_hpp then
+            -- Only consider alive party members (status 0=idle, 1=engaged)
+            if (status == 0 or status == 1) and hpp < lowest_hpp then
                 lowest_hpp = hpp
                 lowest_target = '<p' .. i .. '>'
             end
