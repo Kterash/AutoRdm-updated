@@ -39,11 +39,6 @@ local JOB_NIN = 13
 local JOB_BLM = 4
 
 ------------------------------------------------------------
--- デバッグフラグ
-------------------------------------------------------------
-local DEBUG_MB = false  -- MB検出・実行のデバッグログを有効化
-
-------------------------------------------------------------
 -- spells（必要最小限の魔法定義）
 ------------------------------------------------------------
 local spells = {
@@ -202,6 +197,10 @@ local state = {
         sc_en             = nil,
 
         mb1_spell         = nil,
+        mb2_reserved      = nil,
+        mb2_spell         = nil,
+        mb2_time          = 0,
+        mb2_release_time  = 0,
 
         interrupt_mb      = false,
         interrupt_time    = 0,
@@ -296,27 +295,22 @@ local state = {
     combat_end_suppressed_until = 0,
 }
 
-------------------------------------------------------------
--- WS タイミング定数
-------------------------------------------------------------
-local WS2_MIN_DELAY = 2.5  -- WS2 最小遅延（秒）
-
--- MB検出閾値: count=1(2発目)=2.5-10s, count=2(3発目)=2.5-9.5s, count=3(4発目)=2.5-8.5s, count=4(5発目)=2.5-7.5s
-local MB_DETECTION_THRESHOLDS = {10, 9.5, 8.5, 7.5}
-
 state.mbset = {
     active = false,
     count = 0,
     last_ws_time = 0,
-    thresholds = MB_DETECTION_THRESHOLDS,
+    thresholds = {10,9,8,7},
     pending_mb1 = false,
     mb1_spell = nil,
+    mb2_spell = nil,
     mb1_target = nil,
+    mb2_target = nil,
     mb1_start_time = nil,
+    mb2_time = 0,
     last_detected_sc = nil,
     last_props = nil,
-    logged_reservation = false, -- 予約ログ出力済みフラグ
-    casting_spell = nil,         -- 現在詠唱中のMB魔法名
+    -- 新規: MB1 -> MB2 を待っているフラグ（タイムアウト挙動分岐用）
+    awaiting_mb2 = false,
 }
 
 ------------------------------------------------------------
@@ -633,7 +627,7 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
     end
 
     -- ここで MB が進行中なら完全終了（再開しない）
-    if state.mbset and (state.mbset.active or state.mbset.pending_mb1 or state.mbset.mb1_spell) then
+    if state.mbset and (state.mbset.active or state.mbset.pending_mb1 or state.mbset.mb1_spell or state.mbset.mb2_spell) then
         reset_mbset('SP発動により中断')
     end
 
@@ -827,7 +821,7 @@ local function buffset_cast_next(list)
         return
     end
 
-    if step == 1 and entry.name == "ヘイストII" then
+    if step == 1 and entry.name == "ヘイス��II" then
         local ok, reason = can_start_special()
         if not ok then
             state.buffset.next_time = now() + 0.5
@@ -966,6 +960,10 @@ ws_set_off = function(suppress_log)
 
     w.sc_en = nil
     w.mb1_spell = nil
+    w.mb2_reserved = nil
+    w.mb2_spell = nil
+    w.mb2_time = 0
+    w.mb2_release_time = 0
 
     w.interrupt_mb = false
     w.interrupt_time = 0
@@ -1016,6 +1014,10 @@ local function reset_ws_for_new_set(mode_name)
 
     w.sc_en = nil
     w.mb1_spell = nil
+    w.mb2_reserved = nil
+    w.mb2_spell = nil
+    w.mb2_time = 0
+    w.mb2_release_time = 0
 
     w.interrupt_mb = false
     w.interrupt_time = 0
@@ -1105,7 +1107,7 @@ local function process_ws()
             return
         end
 
-        if tp < 1000 or elapsed < WS2_MIN_DELAY then
+        if tp < 1000 or elapsed < 4 then
             return
         end
 
@@ -1225,7 +1227,7 @@ end
 -- Note: reset_mbset is forward-declared above so functions defined earlier can call it.
 reset_mbset = function(reason)
     local m = state.mbset
-    local was_active = m.active or m.mb1_spell or m.pending_mb1
+    local was_active = m.active or m.mb1_spell or m.mb2_spell or m.pending_mb1
     if reason and was_active then
         log_msg('finish', '【MB】', 'MBセット', '完了')
     end
@@ -1235,12 +1237,14 @@ reset_mbset = function(reason)
     m.last_ws_time = 0
     m.pending_mb1 = false
     m.mb1_spell = nil
+    m.mb2_spell = nil
     m.mb1_target = nil
+    m.mb2_target = nil
     m.mb1_start_time = nil
+    m.mb2_time = 0
     m.last_detected_sc = nil
     m.last_props = nil
-    m.logged_reservation = false
-    m.casting_spell = nil
+    m.awaiting_mb2 = false
 
     state.suspend_buffs = false
     state.buff_resume_time = now()
@@ -1270,18 +1274,10 @@ local function try_start_mb1(spell_name, target, opts)
         end
     end
 
-    -- ★ 変更: WS セット中は MB を割り込ませない（同等優先度）
     if state.ws.active then
-        state.mbset.pending_mb1 = true
-        state.mbset.mb1_spell = spell_name
-        state.mbset.mb1_target = target
-        if not state.mbset.logged_reservation then
-            log_msg('notice', '【MB】', spell_name, '予約', 'WSセット中のため待機')
-            state.mbset.logged_reservation = true
-        end
-        return true
+        --log_msg('report', '【WS】', 'WSセット', '中断', 'MBセット発動')
+        ws_set_off()
     end
-    
     if state.buffset.active then
         log_msg('abort', '【buff】', '強化セット', '中断', 'MBセット発動のため停止')
         state.buffset.active = false
@@ -1297,7 +1293,6 @@ local function try_start_mb1(spell_name, target, opts)
     state.last_spell = spell_name
     state.cast_fail_time = t + 2.0
 
-    state.mbset.casting_spell = spell_name  -- 詠唱開始する魔法を記録
     state.mbset.mb1_spell = spell_name
     state.mbset.mb1_target = target
     state.mbset.mb1_start_time = now()
@@ -1306,35 +1301,31 @@ local function try_start_mb1(spell_name, target, opts)
     send_cmd(('input /ma "%s" %s'):format(spell_name, target))
     log_msg('report', '【MB】', spell_name, 'MB1 詠唱開始')
 
+    state.mbset.mb2_time = state.mbset.mb1_start_time + 4.5
+
+    -- awaiting_mb2 は mb2_spell が決まっているかで判定（MB決定時に設定されることが多い）
+    state.mbset.awaiting_mb2 = (state.mbset.mb2_spell ~= nil)
+
     return true
 end
 
-------------------------------------------------------------
--- ヘルパ: WS後の連携検知でMBセットに移行
-------------------------------------------------------------
-local function transition_to_mb_after_skillchain(parsed, source)
-    if not parsed or not (parsed.sc_en and parsed.mb1) then
-        if DEBUG_MB then
-            log(string.format('[MB-DEBUG] transition_to_mb_after_skillchain: invalid parsed data from %s', source))
-        end
+local function try_start_mb2(spell_name, target)
+    target = target or '<t>'
+    local t = now()
+
+    if not spell_name then
         return false
     end
-    
-    local m = state.mbset
-    m.mb1_spell = parsed.mb1
-    m.mb1_target = '<t>'
-    m.pending_mb1 = true
-    m.last_detected_sc = parsed.sc_en
-    m.active = true
-    
-    if DEBUG_MB then
-        log(string.format('[MB-DEBUG] Transitioning to MB from %s: sc=%s mb1=%s', 
-            source, tostring(parsed.sc_en), tostring(parsed.mb1)))
-    end
-    
-    log_msg('start', '【MB】', 'MBセット', '開始', 
-        string.format('%s連携検知 sc=%s mb1=%s', source, tostring(parsed.sc_en), tostring(parsed.mb1)))
-    
+
+    state.casting = true
+    state.last_spell = spell_name
+    state.cast_fail_time = t + 2.0
+
+    state.mbset.mb2_spell = spell_name
+    state.mbset.mb2_target = target
+
+    send_cmd(('input /ma "%s" %s'):format(spell_name, target))
+    log_msg('report', '【MB】', spell_name, 'MB2 詠唱開始')
     return true
 end
 
@@ -1395,11 +1386,6 @@ local function process_analyzed_ws(result, act)
         m.last_ws_time = t
         m.last_props = result.props
         m.active = true
-        m.logged_reservation = false  -- 新しいMBセット開始時にフラグをリセット
-        if DEBUG_MB then
-            log(string.format('[MB-DEBUG] First WS detected: props=%s actor=%d', 
-                tostring(result.props and table.concat(result.props, ',') or 'nil'), act.actor_id))
-        end
         return
     end
 
@@ -1436,45 +1422,29 @@ local function process_analyzed_ws(result, act)
     local sc_detected = (result.sc_en ~= nil) or (result.success == true)
     if m.count >= 2 and sc_detected then
         local mb1 = result.mb1 or "サンダーII"
+        local mb2 = result.mb2 or "サンダー"
 
-        if DEBUG_MB then
-            log(string.format('[MB-DEBUG] Skillchain detected: count=%d sc=%s mb1=%s props=%s elapsed=%.1f',
-                m.count, tostring(result.sc_en), tostring(mb1), 
-                tostring(result.props and table.concat(result.props, ',') or 'nil'),
-                t - (m.last_ws_time or 0)))
-        end
-
-        -- 新しいMBを予約（既存の予約を上書き）
-        local mb_changed = (m.mb1_spell ~= mb1)
         m.mb1_spell = mb1
+        m.mb2_spell = mb2
         m.mb1_target = '<t>'
+        m.mb2_target = '<t>'
         m.pending_mb1 = true
         m.last_detected_sc = result.sc_en or nil
 
-        -- ログ出力：初回またはMB変更時のみ
-        if not m.logged_reservation then
-            -- 初回ログ：詠唱中なら「次回MB予約」、それ以外は「開始」
-            if state.casting then
-                log_msg('notice', '【MB】', mb1, '次回MB予約', 'MB詠唱中に連携検出')
-            else
-                log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s count=%d sc=%s', tostring(mb1), m.count, tostring(result.sc_en)))
-            end
-            m.logged_reservation = true
-        elseif mb_changed and state.casting then
-            -- 詠唱中にMBが変更された場合のみログ出力（フラグはリセットしない）
-            log_msg('report', '【MB】', mb1, '予約更新', 'MB変更')
-        end
+        m.mb2_time = 0
 
-        -- 詠唱中でなく、他の魔法も実行中でない場合は即実行を試みる
+        -- MBセット開始ログ（MB決定時）
+        log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s count=%d', tostring(mb1), tostring(mb2), m.count))
+
         if not state.casting and not state.current_special.name then
             local ok, reason = can_start_special()
             if ok then
                 try_start_mb1(m.mb1_spell, m.mb1_target)
             else
-                if DEBUG_MB then
-                    log(string.format('[MB-DEBUG] Cannot start MB immediately: %s', tostring(reason)))
-                end
+                log_msg('notice', '【MB】', m.mb1_spell, '予約')
             end
+        else
+            log_msg('notice', '【MB】', m.mb1_spell, '予約')
         end
         return
     end
@@ -1491,42 +1461,41 @@ end
 
 local function process_mbset_in_prerender(t)
     local m = state.mbset
-    
-    -- ★ 変更: pending_mb1 がある場合は active でなくても処理を試みる
-    -- これにより、WS/MBセット非アクティブ時でも連携からのMB発動が可能になる
+    if not m.active then return end
+
     if m.pending_mb1 and m.mb1_spell then
-        if DEBUG_MB then
-            log(string.format('[MB-DEBUG] process_mbset_in_prerender: pending_mb1=%s spell=%s active=%s casting=%s special=%s',
-                tostring(m.pending_mb1), tostring(m.mb1_spell), tostring(m.active),
-                tostring(state.casting), tostring(state.current_special.name)))
-        end
-        
         if not state.casting and not state.current_special.name then
             local ok, reason = can_start_special()
             if ok then
                 try_start_mb1(m.mb1_spell, m.mb1_target)
-            else
-                if DEBUG_MB then
-                    log(string.format('[MB-DEBUG] Cannot start MB: %s', tostring(reason)))
-                end
             end
         end
     end
-    
-    -- タイムアウト判定は active な場合のみ適用
-    if not m.active then return end
 
-    -- タイムアウト判定: countに応じた閾値を使用
-    -- count=1は threshold[1], count=2は threshold[2], ... を使用
+    if m.mb2_time and m.mb2_time > 0 and t >= m.mb2_time then
+        if m.mb2_spell then
+            try_start_mb2(m.mb2_spell, m.mb2_target)
+        end
+        m.mb2_time = 0
+        m.pending_mb1 = false
+        -- mb1/mb2 cleared after MB2 attempt started; do not reset entire mbset here
+        -- m.mb1_spell = nil
+        -- m.mb2_spell = nil
+    end
+
+    -- タイムアウト判定: MB2 を待っている場合は短期タイムアウトを抑制し、長期タイムアウトのみ許容
     if m.count > 0 then
-        local idx = math.max(1, math.min(m.count, #m.thresholds))
-        local threshold = m.thresholds[idx] or 10
-        local timeout_window = threshold + 1
-        if t - (m.last_ws_time or 0) > timeout_window then
-            if DEBUG_MB then
-                log(string.format('[MB-DEBUG] MB timeout: elapsed=%.1f threshold=%d', t - (m.last_ws_time or 0), timeout_window))
+        if m.awaiting_mb2 then
+            -- 長い閾値（MB1開始からの長時間遅延を異常とする）
+            local LONG_TIMEOUT = 8.0
+            if m.mb1_start_time and (t - (m.mb1_start_time or 0) > LONG_TIMEOUT) then
+                reset_mbset('タイムアウト')
             end
-            reset_mbset('タイムアウト')
+        else
+            local SHORT_WINDOW = (m.thresholds[1] or 10) + 1
+            if t - (m.last_ws_time or 0) > SHORT_WINDOW then
+                reset_mbset('タイムアウト')
+            end
         end
     end
 end
@@ -1591,22 +1560,9 @@ windower.register_event('action', function(act)
                 -- ignore Mix: Dark Potion (id 4260)
                 if not (act.param and act.param == 4260) then
                     if is_friendly_actor(act.actor_id) then
-                        if DEBUG_MB then
-                            log(string.format('[MB-DEBUG] Action from friendly actor: cat=%d actor=%d ws_active=%s mbset_active=%s',
-                                act.category, act.actor_id, tostring(state.ws.active), tostring(state.mbset.active)))
-                        end
                         local parsed = detect_with_wsdetector(act, state.mbset.last_props, nil, nil, false)
                         if parsed then
-                            if DEBUG_MB then
-                                log(string.format('[MB-DEBUG] WS detected: ws=%s sc=%s mb1=%s success=%s',
-                                    tostring(parsed.ws_name), tostring(parsed.sc_en), 
-                                    tostring(parsed.mb1), tostring(parsed.success)))
-                            end
                             process_analyzed_ws(parsed, act)
-                        else
-                            if DEBUG_MB and act.category == 3 then
-                                log('[MB-DEBUG] WS_Detector returned nil for category 3 action')
-                            end
                         end
                     end
                 end
@@ -1691,10 +1647,6 @@ windower.register_event('action', function(act)
             end
 
             log_msg('report', '【WS】', parsed.ws_name or cfg.ws2, '実行', 'WS2 成功')
-            
-            -- ★ WS2 で連携検知した場合、MBセットに移行
-            transition_to_mb_after_skillchain(parsed, 'WS2')
-            
             ws_set_off()
             return
         end
@@ -1742,6 +1694,11 @@ windower.register_event('action', function(act)
         state.ws.last_ws_name = parsed.ws_name
 
         state.ws.sc_en = parsed.sc_en
+        state.ws.mb1_spell = parsed.mb1
+        state.ws.mb2_reserved = parsed.mb2
+        state.ws.mb2_spell = nil
+        state.ws.mb2_time = 0
+        state.ws.mb2_release_time = 0
 
         state.buffset.active = false
         state.buffset.step = 0
@@ -1754,14 +1711,12 @@ windower.register_event('action', function(act)
             '【WS】',
             parsed.ws_name,
             '検知',
-            string.format('割り込みWS 成功 sc=%s MB1=%s',
+            string.format('割り込みWS 成功 sc=%s MB1=%s MB2=%s',
                 tostring(parsed.sc_en),
-                tostring(parsed.mb1)
+                tostring(parsed.mb1),
+                tostring(parsed.mb2)
             )
         )
-
-        -- ★ 割り込みWS で連携検知した場合、MBセットに移行
-        transition_to_mb_after_skillchain(parsed, '割り込みWS')
 
         ws_set_off()
         return
@@ -1820,20 +1775,24 @@ local function handle_spell_finish(act)
 
     do
         local m = state.mbset
-        -- 詠唱完了した魔法が、MBセットで詠唱開始した魔法と一致するか確認
-        if m and m.casting_spell and name == m.casting_spell then
+        if m and m.mb1_spell and name == m.mb1_spell then
             log_msg('report', '【MB】', name, '詠唱完了', 'MB1')
-            m.casting_spell = nil  -- 詠唱完了をクリア
-            
-            -- MB詠唱完了後、pending_mb1がまだtrueなら次のMBが予約されている
-            if m.pending_mb1 and m.mb1_spell then
-                m.logged_reservation = false
-                log_msg('start', '【MB】', 'MBセット', '継続', string.format('次MB=%s', tostring(m.mb1_spell)))
-                -- process_mbset_in_prerenderで実行される
+            m.mb1_spell = nil
+            -- MB1 完了後: MB2 が設定されていれば時間を確保、なければ MB セッションを終了しバフ復帰
+            if m.mb2_spell then
+                if m.mb2_time == 0 then
+                    m.mb2_time = now() + 4.0
+                end
+                -- 現在 MB2 を待機中フラグを有効にしておく
+                m.awaiting_mb2 = true
             else
-                -- 予約がない場合は通常通りリセット
-                reset_mbset('MB1詠唱完了')
+                reset_mbset('MB1のみで終了')
             end
+        end
+
+        if m and m.mb2_spell and name == m.mb2_spell then
+            log_msg('report', '【MB】', name, '詠唱完了', 'MB2')
+            reset_mbset('MB2詠唱完了')
         end
     end
 
@@ -2070,6 +2029,11 @@ windower.register_event('prerender', function()
             state.ws.interrupt_mb = false
             state.ws.interrupt_time = 0
             ws_set_off()
+        end
+
+        if state.ws.mb2_release_time and state.ws.mb2_release_time > 0 and t >= state.ws.mb2_release_time then
+            state.suspend_buffs = false
+            state.ws.mb2_release_time = 0
         end
     end
 
@@ -2399,13 +2363,8 @@ windower.register_event('addon command', function(...)
             tostring(state.last_target_id or 'nil'),
             tostring(state.suspend_buffs)
         ))
-        log(string.format('DEBUG_MB=%s (use //ardm mbdebug to toggle)', tostring(DEBUG_MB)))
-
-    elseif cmd == 'mbdebug' then
-        DEBUG_MB = not DEBUG_MB
-        log(string.format('MB Debug Mode: %s', DEBUG_MB and 'ON' or 'OFF'))
 
     else
-        log('使い方: //ardm on | off | reset | seta | setb | setc | buffset | sleepga | sleep2 | silence | dispel | cure4 | debug | mbdebug')
+        log('使い方: //ardm on | off | reset | seta | setb | setc | buffset | sleepga | sleep2 | silence | dispel | cure4 | debug')
     end
 end)
