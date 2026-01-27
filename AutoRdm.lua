@@ -1771,23 +1771,12 @@ local function handle_spell_finish(act)
                 m.queued_mb1_target = nil
                 m.logged_reservation = false
                 
-                -- 次のMBを予約して実行
+                -- 次のMBを予約（process_mbset_in_prerenderで実行される）
                 m.mb1_spell = next_mb
                 m.mb1_target = next_target
                 m.pending_mb1 = true
                 
                 log_msg('start', '【MB】', 'MBセット', '継続', string.format('次MB=%s', tostring(next_mb)))
-                
-                -- 即座に詠唱を試みる
-                coroutine.wrap(function()
-                    coroutine.yield()  -- 1フレーム待機
-                    if m.pending_mb1 and m.mb1_spell then
-                        local ok, reason = can_start_special()
-                        if ok and not state.casting then
-                            try_start_mb1(m.mb1_spell, m.mb1_target)
-                        end
-                    end
-                end)()
             else
                 -- キューがない場合は通常通りリセット
                 reset_mbset('MB1詠唱完了')
