@@ -1404,7 +1404,7 @@ local function process_analyzed_ws(result, act)
         m.last_ws_time = t
         m.last_props = result.props
         if m.count == 0 then
-            m.count = 2  -- First WS + SC-forming WS
+            m.count = 2  -- First detected skillchain (implies at least 2 WSs)
         else
             -- Increment count within time window
             local idx = math.min(m.count, #m.thresholds)
@@ -1413,12 +1413,12 @@ local function process_analyzed_ws(result, act)
             if elapsed >= MIN_MB_WINDOW and elapsed <= max_allowed then
                 m.count = math.min(5, m.count + 1)
             else
-                m.count = 2  -- Outside window, treat as new chain start
+                m.count = 2  -- New chain detected outside window (implies at least 2 WSs for SC)
             end
         end
 
         -- MBセット開始ログ
-        log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s', tostring(mb1), tostring(mb2), tostring(result.sc_en)))
+        log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s count=%d', tostring(mb1), tostring(mb2), tostring(result.sc_en), m.count))
 
         -- Try to start MB1 immediately if possible
         if not state.casting and not state.current_special.name then
