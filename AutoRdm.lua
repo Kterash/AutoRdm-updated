@@ -1347,6 +1347,7 @@ end
 --   - 時間外判定はWSカウントのみリセット
 ------------------------------------------------------------
 local MIN_MB_WINDOW = 2.0
+local MIN_WS_COUNT_FOR_SKILLCHAIN = 2  -- Skillchain detection implies at least 2 WSs
 
 local function process_analyzed_ws(result, act)
     if not result then return end
@@ -1404,7 +1405,7 @@ local function process_analyzed_ws(result, act)
         m.last_ws_time = t
         m.last_props = result.props
         if m.count == 0 then
-            m.count = 2  -- First detected skillchain (implies at least 2 WSs)
+            m.count = MIN_WS_COUNT_FOR_SKILLCHAIN  -- First detected skillchain
         else
             -- Increment count within time window
             local idx = math.min(m.count, #m.thresholds)
@@ -1413,12 +1414,12 @@ local function process_analyzed_ws(result, act)
             if elapsed >= MIN_MB_WINDOW and elapsed <= max_allowed then
                 m.count = math.min(5, m.count + 1)
             else
-                m.count = 2  -- New chain detected outside window (implies at least 2 WSs for SC)
+                m.count = MIN_WS_COUNT_FOR_SKILLCHAIN  -- New chain detected outside window
             end
         end
 
         -- MBセット開始ログ
-        log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s count=%d', tostring(mb1), tostring(mb2), tostring(result.sc_en), m.count))
+        log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s count=%d', mb1, mb2, result.sc_en, m.count))
 
         -- Try to start MB1 immediately if possible
         if not state.casting and not state.current_special.name then
