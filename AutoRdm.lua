@@ -296,7 +296,7 @@ local state = {
 ------------------------------------------------------------
 local WS2_MIN_DELAY = 2.5  -- WS2 最小遅延（秒）
 
--- MB検出閾値: 2発目=2.5-10s, 3発目=2.5-9.5s, 4発目=2.5-8.5s, 5発目=2.5-7.5s
+-- MB検出閾値: count=1(2発目)=2.5-10s, count=2(3発目)=2.5-9.5s, count=3(4発目)=2.5-8.5s, count=4(5発目)=2.5-7.5s
 local MB_DETECTION_THRESHOLDS = {10, 9.5, 8.5, 7.5}
 
 state.mbset = {
@@ -1456,9 +1456,9 @@ local function process_mbset_in_prerender(t)
     end
 
     -- タイムアウト判定: countに応じた閾値を使用
+    -- count=1は threshold[1], count=2は threshold[2], ... を使用
     if m.count > 0 then
-        -- count が 1 の場合は最初の閾値 (10s)、それ以上の場合は count-1 番目の閾値を使用
-        local idx = math.max(1, math.min(m.count, #m.thresholds))
+        local idx = math.min(m.count, #m.thresholds)
         local threshold = m.thresholds[idx] or 10
         local timeout_window = threshold + 1
         if t - (m.last_ws_time or 0) > timeout_window then
