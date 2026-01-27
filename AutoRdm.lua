@@ -1421,24 +1421,24 @@ local function process_analyzed_ws(result, act)
         local mb1 = result.mb1 or "サンダーII"
 
         -- 新しいMBを予約（既存の予約を上書き）
-        local is_new_reservation = (m.mb1_spell ~= mb1) or not m.pending_mb1
+        local mb_changed = (m.mb1_spell ~= mb1)
         m.mb1_spell = mb1
         m.mb1_target = '<t>'
         m.pending_mb1 = true
         m.last_detected_sc = result.sc_en or nil
 
-        -- ログ出力：詠唱中の場合は「次回MB予約」、それ以外は「開始」
+        -- ログ出力：初回またはMB変更時のみ
         if not m.logged_reservation then
+            -- 初回ログ：詠唱中なら「次回MB予約」、それ以外は「開始」
             if state.casting then
                 log_msg('notice', '【MB】', mb1, '次回MB予約', 'MB詠唱中に連携検出')
             else
                 log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s count=%d', tostring(mb1), m.count))
             end
             m.logged_reservation = true
-        elseif is_new_reservation and state.casting then
-            -- 詠唱中に異なるMBに更新された場合のみログ
+        elseif mb_changed and state.casting then
+            -- 詠唱中にMBが変更された場合のみログ出力（フラグはリセットしない）
             log_msg('notice', '【MB】', mb1, '予約更新', 'MB変更')
-            m.logged_reservation = true
         end
 
         -- 詠唱中でなく、他の魔法も実行中でない場合は即実行を試みる
