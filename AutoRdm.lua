@@ -296,7 +296,7 @@ local state = {
 ------------------------------------------------------------
 local WS2_MIN_DELAY = 2.5  -- WS2 最小遅延（秒）
 
--- MB検出閾値: 2発目=10s, 3発目=9.5s, 4発目=8.5s, 5発目=7.5s
+-- MB検出閾値: 2発目=2.5-10s, 3発目=2.5-9.5s, 4発目=2.5-8.5s, 5発目=2.5-7.5s
 local MB_DETECTION_THRESHOLDS = {10, 9.5, 8.5, 7.5}
 
 state.mbset = {
@@ -1297,6 +1297,27 @@ local function try_start_mb1(spell_name, target, opts)
 end
 
 ------------------------------------------------------------
+-- ヘルパ: WS後の連携検知でMBセットに移行
+------------------------------------------------------------
+local function transition_to_mb_after_skillchain(parsed, source)
+    if not (parsed.sc_en and parsed.mb1) then
+        return false
+    end
+    
+    local m = state.mbset
+    m.mb1_spell = parsed.mb1
+    m.mb1_target = '<t>'
+    m.pending_mb1 = true
+    m.last_detected_sc = parsed.sc_en
+    m.active = true
+    
+    log_msg('start', '【MB】', 'MBセット', '開始', 
+        string.format('%s連携検知 sc=%s mb1=%s', source, tostring(parsed.sc_en), tostring(parsed.mb1)))
+    
+    return true
+end
+
+------------------------------------------------------------
 -- ヘルパ: WS_Detector の parse/analyze 互換呼び出し
 ------------------------------------------------------------
 local function detect_with_wsdetector(act, last_props, mode, cfg, hit_flag)
@@ -1434,10 +1455,13 @@ local function process_mbset_in_prerender(t)
         end
     end
 
-    -- タイムアウト判定
+    -- タイムアウト判定: countに応じた閾値を使用
     if m.count > 0 then
-        local SHORT_WINDOW = (m.thresholds[1] or 10) + 1
-        if t - (m.last_ws_time or 0) > SHORT_WINDOW then
+        -- count が 1 の場合は最初の閾値 (10s)、それ以上の場合は count-1 番目の閾値を使用
+        local idx = math.max(1, math.min(m.count, #m.thresholds))
+        local threshold = m.thresholds[idx] or 10
+        local timeout_window = threshold + 1
+        if t - (m.last_ws_time or 0) > timeout_window then
             reset_mbset('タイムアウト')
         end
     end
@@ -1592,15 +1616,7 @@ windower.register_event('action', function(act)
             log_msg('report', '【WS】', parsed.ws_name or cfg.ws2, '実行', 'WS2 成功')
             
             -- ★ WS2 で連携検知した場合、MBセットに移行
-            if parsed.sc_en and parsed.mb1 then
-                local m = state.mbset
-                m.mb1_spell = parsed.mb1
-                m.mb1_target = '<t>'
-                m.pending_mb1 = true
-                m.last_detected_sc = parsed.sc_en
-                m.active = true
-                log_msg('start', '【MB】', 'MBセット', '開始', string.format('WS2連携検知 sc=%s mb1=%s', tostring(parsed.sc_en), tostring(parsed.mb1)))
-            end
+            transition_to_mb_after_skillchain(parsed, 'WS2')
             
             ws_set_off()
             return
@@ -1668,15 +1684,7 @@ windower.register_event('action', function(act)
         )
 
         -- ★ 割り込みWS で連携検知した場合、MBセットに移行
-        if parsed.sc_en and parsed.mb1 then
-            local m = state.mbset
-            m.mb1_spell = parsed.mb1
-            m.mb1_target = '<t>'
-            m.pending_mb1 = true
-            m.last_detected_sc = parsed.sc_en
-            m.active = true
-            log_msg('start', '【MB】', 'MBセット', '開始', string.format('割り込みWS連携検知 sc=%s mb1=%s', tostring(parsed.sc_en), tostring(parsed.mb1)))
-        end
+        transition_to_mb_after_skillchain(parsed, '割り込みWS')
 
         ws_set_off()
         return
