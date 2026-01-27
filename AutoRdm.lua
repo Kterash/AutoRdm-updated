@@ -1,20 +1,11 @@
 ------------------------------------------------------------
--- AutoRdm（V5 ベース：MB 独立化＆WS_Detector 互換対応版・改定）
+-- AutoRdm
 -- 作成: Kazuhiro+Copilot
--- 改定:
---  - MB2 正常完了時にタイムアウトログが出ないよう調整
---  - MBセット開始/終了ログ整備（終了は MB2完了 or 異常終了 のみ）
---  - 戦闘終了検出を一元化して、WS/MB/ターゲット終了ログの重複を防止
---  - WS_Detector.parse があれば parse を優先利用、無ければ analyze にフォールバック
---  - ログタグを【WS】【MB】【SP】【auto】【buff】等で分離
---  - 修正:
---    1) SP が MB を割り込んだ場合、MB を完全終了（再開しない）
---    2) MB 検出の時間判定に下限 3 秒を追加。時間外は MB 終了＋当該 WS を 1 回目として扱う
 ------------------------------------------------------------
 
 _addon.name     = 'AutoRdm'
 _addon.author   = 'Kazuhiro+Copilot'
-_addon.version  = '5.20-v5-mbind-compat-fix'
+_addon.version  = '5.21'
 _addon.commands = {'ardm'}
 
 ------------------------------------------------------------
@@ -1107,7 +1098,7 @@ local function process_ws()
             return
         end
 
-        if tp < 1000 or elapsed < 4 then
+        if tp < 1000 or elapsed < 2 then
             return
         end
 
@@ -1350,9 +1341,9 @@ end
 
 ------------------------------------------------------------
 -- MB 検出結果の処理（検出失敗時は仕切り直し、決定時にMBセット開始ログを出す）
--- 変更: 時間判定に下限 3 秒を導入。範囲外は MB セットを終了して当該 WS を 1 回目として扱う
+-- 変更: 時間判定に下限 2 秒を導入。範囲外は MB セットを終了して当該 WS を 1 回目として扱う
 ------------------------------------------------------------
-local MIN_MB_WINDOW = 3.0
+local MIN_MB_WINDOW = 2.0
 
 local function process_analyzed_ws(result, act)
     if not result then return end
@@ -1686,6 +1677,42 @@ windower.register_event('action', function(act)
         if not (parsed.success or parsed.sc_en) then
             log_msg('abort', '【WS】', 'WSセット', '中断', '割り込みWS 失敗')
             return
+        end
+
+        -- 割り込みWSで新しい連携が発生した場合、MB2予約中であれば
+        -- 古いMBセットを終了し、新しい連携のMB1を直接予約する
+        if state.mbset and (state.mbset.mb2_spell or state.mbset.awaiting_mb2) then
+            -- 古いMBセットを完全に終了
+            reset_mbset('WS割り込みによる新連携発生')
+            -- 新しい連携のMB1/MB2を直接設定（process_analyzed_wsを経由せず）
+            local mb1 = parsed.mb1 or "サンダーII"
+            local mb2 = parsed.mb2 or "サンダー"
+            local m = state.mbset
+            m.count = 2  -- 新しい連携として扱う
+            m.last_ws_time = now()
+            m.last_props = parsed.props
+            m.active = true
+            m.mb1_spell = mb1
+            m.mb2_spell = mb2
+            m.mb1_target = '<t>'
+            m.mb2_target = '<t>'
+            m.pending_mb1 = true
+            m.last_detected_sc = parsed.sc_en or nil
+            m.mb2_time = 0
+            
+            log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s (割り込みWSから)', tostring(mb1), tostring(mb2)))
+            
+            -- MB1を予約
+            if not state.casting and not state.current_special.name then
+                local ok, reason = can_start_special()
+                if ok then
+                    try_start_mb1(m.mb1_spell, m.mb1_target)
+                else
+                    log_msg('notice', '【MB】', m.mb1_spell, '予約')
+                end
+            else
+                log_msg('notice', '【MB】', m.mb1_spell, '予約')
+            end
         end
 
         local now_t = now()
