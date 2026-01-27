@@ -1688,9 +1688,40 @@ windower.register_event('action', function(act)
             return
         end
 
-        -- 割り込みWSで新しい連携が発生した場合、MB2予約中であればMBセットをリセット
+        -- 割り込みWSで新しい連携が発生した場合、MB2予約中であれば
+        -- 古いMBセットを終了し、新しい連携のMB1を直接予約する
         if state.mbset and (state.mbset.mb2_spell or state.mbset.awaiting_mb2) then
+            -- 古いMBセットを完全に終了
             reset_mbset('WS割り込みによる新連携発生')
+            -- 新しい連携のMB1/MB2を直接設定（process_analyzed_wsを経由せず）
+            local mb1 = parsed.mb1 or "サンダーII"
+            local mb2 = parsed.mb2 or "サンダー"
+            local m = state.mbset
+            m.count = 2  -- 新しい連携として扱う
+            m.last_ws_time = now()
+            m.last_props = parsed.props
+            m.active = true
+            m.mb1_spell = mb1
+            m.mb2_spell = mb2
+            m.mb1_target = '<t>'
+            m.mb2_target = '<t>'
+            m.pending_mb1 = true
+            m.last_detected_sc = parsed.sc_en or nil
+            m.mb2_time = 0
+            
+            log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s (割り込みWSから)', tostring(mb1), tostring(mb2)))
+            
+            -- MB1を予約
+            if not state.casting and not state.current_special.name then
+                local ok, reason = can_start_special()
+                if ok then
+                    try_start_mb1(m.mb1_spell, m.mb1_target)
+                else
+                    log_msg('notice', '【MB】', m.mb1_spell, '予約')
+                end
+            else
+                log_msg('notice', '【MB】', m.mb1_spell, '予約')
+            end
         end
 
         local now_t = now()
