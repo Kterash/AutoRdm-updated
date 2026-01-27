@@ -1341,9 +1341,13 @@ end
 
 ------------------------------------------------------------
 -- MB 検出結果の処理（検出失敗時は仕切り直し、決定時にMBセット開始ログを出す）
--- 変更: 時間判定に下限 2 秒を導入。範囲外は MB セットを終了して当該 WS を 1 回目として扱う
+-- 変更: WS検出とMBセットを完全に独立させる
+--   - 連携検出時は常に既存MBセットを終了して新しいMBセットを開始
+--   - WS カウントは独立して維持（チェイン追跡用）
+--   - 時間外判定はWSカウントのみリセット
 ------------------------------------------------------------
 local MIN_MB_WINDOW = 2.0
+local MIN_WS_COUNT_FOR_SKILLCHAIN = 2  -- Skillchain detection implies at least 2 WSs
 
 local function process_analyzed_ws(result, act)
     if not result then return end
@@ -1372,61 +1376,52 @@ local function process_analyzed_ws(result, act)
     local t = now()
     local m = state.mbset
 
-    if m.count == 0 then
-        m.count = 1
-        m.last_ws_time = t
-        m.last_props = result.props
-        m.active = true
-        return
-    end
-
-    -- idx は「次に評価する閾値インデックス（現在の count を基に）」とする
-    local idx = math.min(m.count, #m.thresholds)
-    local max_allowed = m.thresholds[idx] or 7
-    local allowed = math.max(MIN_MB_WINDOW, max_allowed)
-
-    local elapsed = t - (m.last_ws_time or 0)
-
-    -- elapsed が MIN_MB_WINDOW（下限）未満、または上限を超えている場合は「時間外」
-    if elapsed < MIN_MB_WINDOW or elapsed > max_allowed then
-        -- 時間外：既存の MB セットを終了して、この WS を "1 回目" として扱う
-        reset_mbset('時間外のWSを検知')
-        -- 新たに 1 回目として開始
-        m.count = 1
-        m.last_ws_time = t
-        m.last_props = result.props
-        m.active = true
-        log_msg('abort', '【MB】', 'MBセット', '連携検知失敗')
-        return
-    end
-
-    -- ここまで来たら elapsed が [MIN_MB_WINDOW, max_allowed] の範囲内（許容内）
-    if t - (m.last_ws_time or 0) <= max_allowed then
-        m.count = math.min(5, m.count + 1)
-    else
-        m.count = 1
-    end
-
-    m.last_ws_time = t
-    m.last_props = result.props
-
-    local sc_detected = (result.sc_en ~= nil) or (result.success == true)
-    if m.count >= 2 and sc_detected then
+    -- Skillchain detection - independent of count
+    local sc_detected = (result.sc_en ~= nil)
+    
+    -- If skillchain detected, ALWAYS terminate current MB set and start new one
+    if sc_detected then
+        -- Check if there's an active MB set to terminate
+        local was_active = m.active or m.mb1_spell or m.mb2_spell or m.pending_mb1
+        if was_active then
+            reset_mbset('新しい連携を検知; MBセットをリセット')
+        end
+        
+        -- Start new MB set with detected skillchain
         local mb1 = result.mb1 or "サンダーII"
         local mb2 = result.mb2 or "サンダー"
 
+        m.active = true
         m.mb1_spell = mb1
         m.mb2_spell = mb2
         m.mb1_target = '<t>'
         m.mb2_target = '<t>'
         m.pending_mb1 = true
-        m.last_detected_sc = result.sc_en or nil
-
+        m.last_detected_sc = result.sc_en
         m.mb2_time = 0
 
-        -- MBセット開始ログ（MB決定時）
-        log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s count=%d', tostring(mb1), tostring(mb2), m.count))
+        -- Update WS tracking (independent)
+        local prev_ws_time = m.last_ws_time
+        m.last_ws_time = t
+        m.last_props = result.props
+        if m.count == 0 then
+            m.count = MIN_WS_COUNT_FOR_SKILLCHAIN  -- First detected skillchain
+        else
+            -- Increment count within time window
+            local idx = math.min(m.count, #m.thresholds)
+            local max_allowed = m.thresholds[idx] or 7
+            local elapsed = t - (prev_ws_time or 0)
+            if elapsed >= MIN_MB_WINDOW and elapsed <= max_allowed then
+                m.count = math.min(5, m.count + 1)
+            else
+                m.count = MIN_WS_COUNT_FOR_SKILLCHAIN  -- New chain detected outside window
+            end
+        end
 
+        -- MBセット開始ログ
+        log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s count=%d', mb1, mb2, result.sc_en, m.count))
+
+        -- Try to start MB1 immediately if possible
         if not state.casting and not state.current_special.name then
             local ok, reason = can_start_special()
             if ok then
@@ -1440,14 +1435,36 @@ local function process_analyzed_ws(result, act)
         return
     end
 
-    if m.count >= 2 and not sc_detected then
+    -- No skillchain detected - update WS count independently
+    if m.count == 0 then
+        -- First WS in potential chain
         m.count = 1
         m.last_ws_time = t
         m.last_props = result.props
         m.active = true
-        log_msg('abort', '【MB】', 'MBセット', '連携検知失敗')
         return
     end
+
+    -- Check timing for chaining
+    local idx = math.min(m.count, #m.thresholds)
+    local max_allowed = m.thresholds[idx] or 7
+    local elapsed = t - (m.last_ws_time or 0)
+
+    -- Time-based reset: only affects WS count, not MB state
+    if elapsed < MIN_MB_WINDOW or elapsed > max_allowed then
+        -- Outside valid time window: reset WS count, treat as new chain start
+        m.count = 1
+        m.last_ws_time = t
+        m.last_props = result.props
+        m.active = true
+        -- Note: MB set is NOT reset here; only WS tracking is reset
+        return
+    end
+
+    -- Within valid time window: increment WS count
+    m.count = math.min(5, m.count + 1)
+    m.last_ws_time = t
+    m.last_props = result.props
 end
 
 local function process_mbset_in_prerender(t)
@@ -1679,41 +1696,9 @@ windower.register_event('action', function(act)
             return
         end
 
-        -- 割り込みWSで新しい連携が発生した場合、MB2予約中であれば
-        -- 古いMBセットを終了し、新しい連携のMB1を直接予約する
-        if state.mbset and (state.mbset.mb2_spell or state.mbset.awaiting_mb2) then
-            -- 古いMBセットを完全に終了
-            reset_mbset('WS割り込みによる新連携発生')
-            -- 新しい連携のMB1/MB2を直接設定（process_analyzed_wsを経由せず）
-            local mb1 = parsed.mb1 or "サンダーII"
-            local mb2 = parsed.mb2 or "サンダー"
-            local m = state.mbset
-            m.count = 2  -- 新しい連携として扱う
-            m.last_ws_time = now()
-            m.last_props = parsed.props
-            m.active = true
-            m.mb1_spell = mb1
-            m.mb2_spell = mb2
-            m.mb1_target = '<t>'
-            m.mb2_target = '<t>'
-            m.pending_mb1 = true
-            m.last_detected_sc = parsed.sc_en or nil
-            m.mb2_time = 0
-            
-            log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s (割り込みWSから)', tostring(mb1), tostring(mb2)))
-            
-            -- MB1を予約
-            if not state.casting and not state.current_special.name then
-                local ok, reason = can_start_special()
-                if ok then
-                    try_start_mb1(m.mb1_spell, m.mb1_target)
-                else
-                    log_msg('notice', '【MB】', m.mb1_spell, '予約')
-                end
-            else
-                log_msg('notice', '【MB】', m.mb1_spell, '予約')
-            end
-        end
+        -- 割り込みWSは process_analyzed_ws を使って統一的に処理
+        -- 連携が検出された場合は自動的に既存MBセットをリセットして新しいMBセットを開始
+        process_analyzed_ws(parsed, act)
 
         local now_t = now()
         state.ws.ws2_name = parsed.ws_name
