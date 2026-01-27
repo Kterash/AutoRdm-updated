@@ -1107,7 +1107,7 @@ local function process_ws()
             return
         end
 
-        if tp < 1000 or elapsed < 4 then
+        if tp < 1000 or elapsed < 2 then
             return
         end
 
@@ -1350,9 +1350,9 @@ end
 
 ------------------------------------------------------------
 -- MB 検出結果の処理（検出失敗時は仕切り直し、決定時にMBセット開始ログを出す）
--- 変更: 時間判定に下限 3 秒を導入。範囲外は MB セットを終了して当該 WS を 1 回目として扱う
+-- 変更: 時間判定に下限 2 秒を導入。範囲外は MB セットを終了して当該 WS を 1 回目として扱う
 ------------------------------------------------------------
-local MIN_MB_WINDOW = 3.0
+local MIN_MB_WINDOW = 2.0
 
 local function process_analyzed_ws(result, act)
     if not result then return end
@@ -1686,6 +1686,11 @@ windower.register_event('action', function(act)
         if not (parsed.success or parsed.sc_en) then
             log_msg('abort', '【WS】', 'WSセット', '中断', '割り込みWS 失敗')
             return
+        end
+
+        -- 割り込みWSで新しい連携が発生した場合、MB2予約中であればMBセットをリセット
+        if state.mbset and (state.mbset.mb2_spell or state.mbset.awaiting_mb2) then
+            reset_mbset('WS割り込みによる新連携発生')
         end
 
         local now_t = now()
