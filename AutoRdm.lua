@@ -39,6 +39,11 @@ local JOB_NIN = 13
 local JOB_BLM = 4
 
 ------------------------------------------------------------
+-- デバッグフラグ
+------------------------------------------------------------
+local DEBUG_MB = false  -- MB検出・実行のデバッグログを有効化
+
+------------------------------------------------------------
 -- spells（必要最小限の魔法定義）
 ------------------------------------------------------------
 local spells = {
@@ -1309,6 +1314,9 @@ end
 ------------------------------------------------------------
 local function transition_to_mb_after_skillchain(parsed, source)
     if not parsed or not (parsed.sc_en and parsed.mb1) then
+        if DEBUG_MB then
+            log(string.format('[MB-DEBUG] transition_to_mb_after_skillchain: invalid parsed data from %s', source))
+        end
         return false
     end
     
@@ -1318,6 +1326,11 @@ local function transition_to_mb_after_skillchain(parsed, source)
     m.pending_mb1 = true
     m.last_detected_sc = parsed.sc_en
     m.active = true
+    
+    if DEBUG_MB then
+        log(string.format('[MB-DEBUG] Transitioning to MB from %s: sc=%s mb1=%s', 
+            source, tostring(parsed.sc_en), tostring(parsed.mb1)))
+    end
     
     log_msg('start', '【MB】', 'MBセット', '開始', 
         string.format('%s連携検知 sc=%s mb1=%s', source, tostring(parsed.sc_en), tostring(parsed.mb1)))
@@ -1383,6 +1396,10 @@ local function process_analyzed_ws(result, act)
         m.last_props = result.props
         m.active = true
         m.logged_reservation = false  -- 新しいMBセット開始時にフラグをリセット
+        if DEBUG_MB then
+            log(string.format('[MB-DEBUG] First WS detected: props=%s actor=%d', 
+                tostring(result.props and table.concat(result.props, ',') or 'nil'), act.actor_id))
+        end
         return
     end
 
@@ -1420,6 +1437,13 @@ local function process_analyzed_ws(result, act)
     if m.count >= 2 and sc_detected then
         local mb1 = result.mb1 or "サンダーII"
 
+        if DEBUG_MB then
+            log(string.format('[MB-DEBUG] Skillchain detected: count=%d sc=%s mb1=%s props=%s elapsed=%.1f',
+                m.count, tostring(result.sc_en), tostring(mb1), 
+                tostring(result.props and table.concat(result.props, ',') or 'nil'),
+                t - (m.last_ws_time or 0)))
+        end
+
         -- 新しいMBを予約（既存の予約を上書き）
         local mb_changed = (m.mb1_spell ~= mb1)
         m.mb1_spell = mb1
@@ -1433,7 +1457,7 @@ local function process_analyzed_ws(result, act)
             if state.casting then
                 log_msg('notice', '【MB】', mb1, '次回MB予約', 'MB詠唱中に連携検出')
             else
-                --log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s count=%d', tostring(mb1), m.count))
+                log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s count=%d sc=%s', tostring(mb1), m.count, tostring(result.sc_en)))
             end
             m.logged_reservation = true
         elseif mb_changed and state.casting then
@@ -1446,6 +1470,10 @@ local function process_analyzed_ws(result, act)
             local ok, reason = can_start_special()
             if ok then
                 try_start_mb1(m.mb1_spell, m.mb1_target)
+            else
+                if DEBUG_MB then
+                    log(string.format('[MB-DEBUG] Cannot start MB immediately: %s', tostring(reason)))
+                end
             end
         end
         return
@@ -1463,16 +1491,30 @@ end
 
 local function process_mbset_in_prerender(t)
     local m = state.mbset
-    if not m.active then return end
-
+    
+    -- ★ 変更: pending_mb1 がある場合は active でなくても処理を試みる
+    -- これにより、WS/MBセット非アクティブ時でも連携からのMB発動が可能になる
     if m.pending_mb1 and m.mb1_spell then
+        if DEBUG_MB then
+            log(string.format('[MB-DEBUG] process_mbset_in_prerender: pending_mb1=%s spell=%s active=%s casting=%s special=%s',
+                tostring(m.pending_mb1), tostring(m.mb1_spell), tostring(m.active),
+                tostring(state.casting), tostring(state.current_special.name)))
+        end
+        
         if not state.casting and not state.current_special.name then
             local ok, reason = can_start_special()
             if ok then
                 try_start_mb1(m.mb1_spell, m.mb1_target)
+            else
+                if DEBUG_MB then
+                    log(string.format('[MB-DEBUG] Cannot start MB: %s', tostring(reason)))
+                end
             end
         end
     end
+    
+    -- タイムアウト判定は active な場合のみ適用
+    if not m.active then return end
 
     -- タイムアウト判定: countに応じた閾値を使用
     -- count=1は threshold[1], count=2は threshold[2], ... を使用
@@ -1481,6 +1523,9 @@ local function process_mbset_in_prerender(t)
         local threshold = m.thresholds[idx] or 10
         local timeout_window = threshold + 1
         if t - (m.last_ws_time or 0) > timeout_window then
+            if DEBUG_MB then
+                log(string.format('[MB-DEBUG] MB timeout: elapsed=%.1f threshold=%d', t - (m.last_ws_time or 0), timeout_window))
+            end
             reset_mbset('タイムアウト')
         end
     end
@@ -1546,9 +1591,22 @@ windower.register_event('action', function(act)
                 -- ignore Mix: Dark Potion (id 4260)
                 if not (act.param and act.param == 4260) then
                     if is_friendly_actor(act.actor_id) then
+                        if DEBUG_MB then
+                            log(string.format('[MB-DEBUG] Action from friendly actor: cat=%d actor=%d ws_active=%s mbset_active=%s',
+                                act.category, act.actor_id, tostring(state.ws.active), tostring(state.mbset.active)))
+                        end
                         local parsed = detect_with_wsdetector(act, state.mbset.last_props, nil, nil, false)
                         if parsed then
+                            if DEBUG_MB then
+                                log(string.format('[MB-DEBUG] WS detected: ws=%s sc=%s mb1=%s success=%s',
+                                    tostring(parsed.ws_name), tostring(parsed.sc_en), 
+                                    tostring(parsed.mb1), tostring(parsed.success)))
+                            end
                             process_analyzed_ws(parsed, act)
+                        else
+                            if DEBUG_MB and act.category == 3 then
+                                log('[MB-DEBUG] WS_Detector returned nil for category 3 action')
+                            end
                         end
                     end
                 end
@@ -2341,8 +2399,13 @@ windower.register_event('addon command', function(...)
             tostring(state.last_target_id or 'nil'),
             tostring(state.suspend_buffs)
         ))
+        log(string.format('DEBUG_MB=%s (use //ardm mbdebug to toggle)', tostring(DEBUG_MB)))
+
+    elseif cmd == 'mbdebug' then
+        DEBUG_MB = not DEBUG_MB
+        log(string.format('MB Debug Mode: %s', DEBUG_MB and 'ON' or 'OFF'))
 
     else
-        log('使い方: //ardm on | off | reset | seta | setb | setc | buffset | sleepga | sleep2 | silence | dispel | cure4 | debug')
+        log('使い方: //ardm on | off | reset | seta | setb | setc | buffset | sleepga | sleep2 | silence | dispel | cure4 | debug | mbdebug')
     end
 end)
