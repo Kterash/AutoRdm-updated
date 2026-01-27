@@ -322,6 +322,7 @@ local SPECIAL_PRIORITY = {
     ["スリプルII"] = 3,
     ["サイレス"]   = 4,
     ["ディスペル"] = 5,
+    ["ケアルIV"]   = 999,
 }
 
 ------------------------------------------------------------
@@ -362,6 +363,33 @@ local function is_any_spell_casting()
     if state.current_special and state.current_special.name then return true end
     if state.combatbuff and state.combatbuff.casting then return true end
     return false
+end
+
+------------------------------------------------------------
+-- find_lowest_hp_target（パーティ内最低HP%のメンバーを検索）
+------------------------------------------------------------
+local function find_lowest_hp_target()
+    local party = windower.ffxi.get_party()
+    if not party then return '<me>' end
+    
+    local lowest_hpp = 100
+    local lowest_target = nil
+    
+    -- Check all party members (p0-p5)
+    for i = 0, 5 do
+        local member = party['p' .. i]
+        if member and member.mob then
+            local status = member.mob.status or 0
+            local hpp = member.mob.hpp or 100
+            -- Only consider alive party members (status 0=idle, 1=engaged)
+            if (status == 0 or status == 1) and hpp < lowest_hpp then
+                lowest_hpp = hpp
+                lowest_target = '<p' .. i .. '>'
+            end
+        end
+    end
+    
+    return lowest_target or '<me>'
 end
 
 ------------------------------------------------------------
@@ -556,6 +584,15 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
     is_from_queue = not not is_from_queue
     is_sleep2 = not not is_sleep2
     target = target or '<t>'
+
+    -- Cure IV target selection logic
+    if name == spells.cure4.name then
+        if p.vitals.hpp <= 60 then
+            target = '<me>'
+        else
+            target = find_lowest_hp_target()
+        end
+    end
 
     if is_sleep2 and target == '<stnpc>' then
         send_cmd(('input /ma "%s" <stnpc>'):format(name))
@@ -2309,6 +2346,9 @@ windower.register_event('addon command', function(...)
     elseif cmd == 'dispel' then
         enqueue_special_spell(spells.dispel.name, spells.dispel.recast_id, '<t>', false)
 
+    elseif cmd == 'cure4' then
+        enqueue_special_spell(spells.cure4.name, spells.cure4.recast_id, nil, false)
+
     elseif cmd == 'debug' then
         log(('debug: ws_active=%s buffset=%s step=%d waiting=%s special=%s retry_active=%s mbset.active=%s mbcount=%d last_props=%s target_id=%s suspend_buffs=%s'):format(
             tostring(state.ws.active),
@@ -2325,6 +2365,6 @@ windower.register_event('addon command', function(...)
         ))
 
     else
-        log('使い方: //ardm on | off | reset | seta | setb | setc | buffset | sleepga | sleep2 | silence | dispel | debug')
+        log('使い方: //ardm on | off | reset | seta | setb | setc | buffset | sleepga | sleep2 | silence | dispel | cure4 | debug')
     end
 end)
