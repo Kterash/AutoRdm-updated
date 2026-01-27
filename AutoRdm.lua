@@ -1300,7 +1300,7 @@ end
 -- ヘルパ: WS後の連携検知でMBセットに移行
 ------------------------------------------------------------
 local function transition_to_mb_after_skillchain(parsed, source)
-    if not (parsed.sc_en and parsed.mb1) then
+    if not parsed or not (parsed.sc_en and parsed.mb1) then
         return false
     end
     
@@ -1458,7 +1458,7 @@ local function process_mbset_in_prerender(t)
     -- タイムアウト判定: countに応じた閾値を使用
     -- count=1は threshold[1], count=2は threshold[2], ... を使用
     if m.count > 0 then
-        local idx = math.min(m.count, #m.thresholds)
+        local idx = math.max(1, math.min(m.count, #m.thresholds))
         local threshold = m.thresholds[idx] or 10
         local timeout_window = threshold + 1
         if t - (m.last_ws_time or 0) > timeout_window then
