@@ -291,11 +291,19 @@ local state = {
     combat_end_suppressed_until = 0,
 }
 
+------------------------------------------------------------
+-- WS タイミング定数
+------------------------------------------------------------
+local WS2_MIN_DELAY = 2.5  -- WS2 最小遅延（秒）
+
+-- MB検出閾値: 2発目=10s, 3発目=9.5s, 4発目=8.5s, 5発目=7.5s
+local MB_DETECTION_THRESHOLDS = {10, 9.5, 8.5, 7.5}
+
 state.mbset = {
     active = false,
     count = 0,
     last_ws_time = 0,
-    thresholds = {10,9.5,8.5,7.5},
+    thresholds = MB_DETECTION_THRESHOLDS,
     pending_mb1 = false,
     mb1_spell = nil,
     mb1_target = nil,
@@ -1090,7 +1098,7 @@ local function process_ws()
             return
         end
 
-        if tp < 1000 or elapsed < 2.5 then
+        if tp < 1000 or elapsed < WS2_MIN_DELAY then
             return
         end
 
