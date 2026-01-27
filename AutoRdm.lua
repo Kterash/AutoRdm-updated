@@ -310,9 +310,8 @@ state.mbset = {
     mb1_start_time = nil,
     last_detected_sc = nil,
     last_props = nil,
-    queued_mb1 = nil,        -- 詠唱中に検出された次のMB魔法
-    queued_mb1_target = nil, -- 詠唱中に検出された次のMBターゲット
     logged_reservation = false, -- 予約ログ出力済みフラグ
+    casting_spell = nil,         -- 現在詠唱中のMB魔法名
 }
 
 ------------------------------------------------------------
@@ -1235,9 +1234,8 @@ reset_mbset = function(reason)
     m.mb1_start_time = nil
     m.last_detected_sc = nil
     m.last_props = nil
-    m.queued_mb1 = nil
-    m.queued_mb1_target = nil
     m.logged_reservation = false
+    m.casting_spell = nil
 
     state.suspend_buffs = false
     state.buff_resume_time = now()
@@ -1272,7 +1270,10 @@ local function try_start_mb1(spell_name, target, opts)
         state.mbset.pending_mb1 = true
         state.mbset.mb1_spell = spell_name
         state.mbset.mb1_target = target
-        log_msg('notice', '【MB】', spell_name, '予約', 'WSセット中のため待機')
+        if not state.mbset.logged_reservation then
+            log_msg('notice', '【MB】', spell_name, '予約', 'WSセット中のため待機')
+            state.mbset.logged_reservation = true
+        end
         return true
     end
     
@@ -1291,6 +1292,7 @@ local function try_start_mb1(spell_name, target, opts)
     state.last_spell = spell_name
     state.cast_fail_time = t + 2.0
 
+    state.mbset.casting_spell = spell_name  -- 詠唱開始する魔法を記録
     state.mbset.mb1_spell = spell_name
     state.mbset.mb1_target = target
     state.mbset.mb1_start_time = now()
@@ -1418,28 +1420,28 @@ local function process_analyzed_ws(result, act)
     if m.count >= 2 and sc_detected then
         local mb1 = result.mb1 or "サンダーII"
 
-        -- MB詠唱中に新しい連携が検出された場合は、キューに保存
-        if state.casting and m.mb1_spell then
-            m.queued_mb1 = mb1
-            m.queued_mb1_target = '<t>'
-            if not m.logged_reservation then
-                log_msg('notice', '【MB】', mb1, '次回MB予約', 'MB詠唱中に連携検出')
-                m.logged_reservation = true
-            end
-            return
-        end
-
+        -- 新しいMBを予約（既存の予約を上書き）
+        local mb_changed = (m.mb1_spell ~= mb1)
         m.mb1_spell = mb1
         m.mb1_target = '<t>'
         m.pending_mb1 = true
         m.last_detected_sc = result.sc_en or nil
 
-        -- MBセット開始ログ（MB決定時）
+        -- ログ出力：初回またはMB変更時のみ
         if not m.logged_reservation then
-            log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s count=%d', tostring(mb1), m.count))
+            -- 初回ログ：詠唱中なら「次回MB予約」、それ以外は「開始」
+            if state.casting then
+                log_msg('notice', '【MB】', mb1, '次回MB予約', 'MB詠唱中に連携検出')
+            else
+                log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s count=%d', tostring(mb1), m.count))
+            end
             m.logged_reservation = true
+        elseif mb_changed and state.casting then
+            -- 詠唱中にMBが変更された場合のみログ出力（フラグはリセットしない）
+            log_msg('notice', '【MB】', mb1, '予約更新', 'MB変更')
         end
 
+        -- 詠唱中でなく、他の魔法も実行中でない場合は即実行を試みる
         if not state.casting and not state.current_special.name then
             local ok, reason = can_start_special()
             if ok then
@@ -1760,25 +1762,18 @@ local function handle_spell_finish(act)
 
     do
         local m = state.mbset
-        if m and m.mb1_spell and name == m.mb1_spell then
+        -- 詠唱完了した魔法が、MBセットで詠唱開始した魔法と一致するか確認
+        if m and m.casting_spell and name == m.casting_spell then
             log_msg('report', '【MB】', name, '詠唱完了', 'MB1')
+            m.casting_spell = nil  -- 詠唱完了をクリア
             
-            -- MB詠唱中に新しい連携が検出されていた場合、次のMBを開始
-            if m.queued_mb1 then
-                local next_mb = m.queued_mb1
-                local next_target = m.queued_mb1_target or '<t>'
-                m.queued_mb1 = nil
-                m.queued_mb1_target = nil
+            -- MB詠唱完了後、pending_mb1がまだtrueなら次のMBが予約されている
+            if m.pending_mb1 and m.mb1_spell then
                 m.logged_reservation = false
-                
-                -- 次のMBを予約（process_mbset_in_prerenderで実行される）
-                m.mb1_spell = next_mb
-                m.mb1_target = next_target
-                m.pending_mb1 = true
-                
-                log_msg('start', '【MB】', 'MBセット', '継続', string.format('次MB=%s', tostring(next_mb)))
+                log_msg('start', '【MB】', 'MBセット', '継続', string.format('次MB=%s', tostring(m.mb1_spell)))
+                -- process_mbset_in_prerenderで実行される
             else
-                -- キューがない場合は通常通りリセット
+                -- 予約がない場合は通常通りリセット
                 reset_mbset('MB1詠唱完了')
             end
         end
