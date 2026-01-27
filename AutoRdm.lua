@@ -1223,9 +1223,12 @@ reset_mbset = function(reason)
         log_msg('finish', '【MB】', 'MBセット', '完了')
     end
 
+    -- Reset ONLY MB-related state (NOT skillchain tracking)
+    -- Preserved for skillchain tracking:
+    --   m.count
+    --   m.last_ws_time
+    --   m.last_props
     m.active = false
-    m.count = 0
-    m.last_ws_time = 0
     m.pending_mb1 = false
     m.mb1_spell = nil
     m.mb2_spell = nil
@@ -1234,11 +1237,21 @@ reset_mbset = function(reason)
     m.mb1_start_time = nil
     m.mb2_time = 0
     m.last_detected_sc = nil
-    m.last_props = nil
     m.awaiting_mb2 = false
 
     state.suspend_buffs = false
     state.buff_resume_time = now()
+end
+
+------------------------------------------------------------
+-- reset_ws_chain: Resets WS chain tracking state independently of MB state
+-- Used when WS chains should be terminated (timeouts, combat end, target change)
+------------------------------------------------------------
+local function reset_ws_chain()
+    local m = state.mbset
+    m.count = 0
+    m.last_ws_time = 0
+    m.last_props = nil
 end
 
 local function try_start_mb1(spell_name, target, opts)
@@ -1498,11 +1511,13 @@ local function process_mbset_in_prerender(t)
             local LONG_TIMEOUT = 5.0
             if m.mb1_start_time and (t - (m.mb1_start_time or 0) > LONG_TIMEOUT) then
                 reset_mbset('タイムアウト')
+                reset_ws_chain()  -- Reset WS chain on MB timeout
             end
         else
             local SHORT_WINDOW = (m.thresholds[1] or 10) + 0.5
             if t - (m.last_ws_time or 0) > SHORT_WINDOW then
                 reset_mbset('タイムアウト')
+                reset_ws_chain()  -- Reset WS chain on WS timeout
             end
         end
     end
@@ -1838,6 +1853,7 @@ local function emit_combat_end(reason)
     -- サイレントに外部状態をリセット（WS の終了ログは出さない）
     ws_set_off(true)        -- suppress_log = true
     reset_mbset()           -- silent reset (no reason -> no MB finish log)
+    reset_ws_chain()        -- Reset WS chain tracking on combat end
 
     -- 直後の重複出力を抑止（1秒程度）
     state.combat_end_suppressed_until = t + 1.0
@@ -1886,6 +1902,7 @@ windower.register_event('prerender', function()
             -- サイレントにリセット
             ws_set_off(true)
             reset_mbset()
+            reset_ws_chain()  -- Reset WS chain on target change
         else
             if state.ws.active then
                 --log_msg('finish', '【WS】', 'WSセット', '完了', 'ターゲット撃破')
@@ -1894,6 +1911,7 @@ windower.register_event('prerender', function()
 
             -- ターゲット変更時に MB をリセット（理由付きログ）
             reset_mbset('ターゲット切替')
+            reset_ws_chain()  -- Reset WS chain on target change
         end
 
         state.current_special.name = nil
@@ -2301,6 +2319,7 @@ function reset_all_states()
     state.first_hit_done = false
 
     reset_mbset()
+    reset_ws_chain()  -- Also reset WS chain tracking on full reset
 
     log('完全リセット')
 end
@@ -2326,6 +2345,7 @@ windower.register_event('addon command', function(...)
         state.buffset.next_time = 0
         reset_retry()
         reset_mbset()
+        reset_ws_chain()  -- Also reset WS chain tracking on addon off
         log('OFF')
 
     elseif cmd == 'reset' then
