@@ -1224,8 +1224,11 @@ reset_mbset = function(reason)
     end
 
     -- Reset ONLY MB-related state (NOT skillchain tracking)
+    -- Preserved for skillchain tracking:
+    --   m.count
+    --   m.last_ws_time
+    --   m.last_props
     m.active = false
-    -- m.count, m.last_ws_time, m.last_props are preserved for skillchain tracking
     m.pending_mb1 = false
     m.mb1_spell = nil
     m.mb2_spell = nil
@@ -1240,7 +1243,10 @@ reset_mbset = function(reason)
     state.buff_resume_time = now()
 end
 
--- Separate function to reset WS chain tracking state (independent of MB state)
+------------------------------------------------------------
+-- reset_ws_chain: Resets WS chain tracking state independently of MB state
+-- Used when WS chains should be terminated (timeouts, combat end, target change)
+------------------------------------------------------------
 local function reset_ws_chain()
     local m = state.mbset
     m.count = 0
