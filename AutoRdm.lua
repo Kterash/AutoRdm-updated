@@ -1433,12 +1433,12 @@ local function process_analyzed_ws(result, act)
             if state.casting then
                 log_msg('notice', '【MB】', mb1, '次回MB予約', 'MB詠唱中に連携検出')
             else
-                log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s count=%d', tostring(mb1), m.count))
+                --log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s count=%d', tostring(mb1), m.count))
             end
             m.logged_reservation = true
         elseif mb_changed and state.casting then
             -- 詠唱中にMBが変更された場合のみログ出力（フラグはリセットしない）
-            log_msg('notice', '【MB】', mb1, '予約更新', 'MB変更')
+            log_msg('report', '【MB】', mb1, '予約更新', 'MB変更')
         end
 
         -- 詠唱中でなく、他の魔法も実行中でない場合は即実行を試みる
