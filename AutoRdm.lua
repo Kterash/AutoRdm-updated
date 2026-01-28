@@ -33,7 +33,7 @@ local JOB_BLM = 4
 -- 安全制限（無限ループ防止）
 ------------------------------------------------------------
 local MAX_ITERATIONS = 100          -- ループの最大反復回数
-local MAX_PARTY_MEMBERS = 18        -- パーティメンバーの最大数
+local MAX_RESOURCE_ITERATIONS = 5000 -- リソースルックアップの最大反復回数
 local MAX_TARGETS = 50              -- ターゲットリストの最大数
 
 ------------------------------------------------------------
@@ -146,7 +146,7 @@ local function build_monster_abilities_by_message()
     local count = 0
     for id, ws in pairs(res.monster_abilities) do
         count = count + 1
-        if count > MAX_ITERATIONS * 50 then
+        if count > MAX_RESOURCE_ITERATIONS then
             break
         end
         if ws.message and ws.message ~= 0 then
@@ -1610,10 +1610,11 @@ windower.register_event('action', function(act)
             end
             if includes_my_target then
                 -- 負荷軽減: 関連するアクションのみ 0.02秒間隔でスキップ
-                if t - state.last_action_time < 0.02 then
+                local last_time = state.last_action_time or 0
+                state.last_action_time = t
+                if t - last_time < 0.02 then
                     return
                 end
-                state.last_action_time = t
                 
                 -- ignore Mix: Dark Potion (id 4260)
                 if not (act.param and act.param == 4260) then
