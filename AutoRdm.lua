@@ -389,9 +389,8 @@ local function find_lowest_hp_target()
     local lowest_hpp = 100
     local lowest_target = nil
     
-    -- Check all party members (p0-p5), with safety limit
-    local max_check = math.min(5, MAX_PARTY_MEMBERS - 1)
-    for i = 0, max_check do
+    -- Check all party members (p0-p5)
+    for i = 0, 5 do
         local member = party['p' .. i]
         if member and member.mob then
             local status = member.mob.status or 0
@@ -1593,14 +1592,8 @@ windower.register_event('action', function(act)
     end
 
     -- MB 検出（戦闘中・自分のターゲットに対する action のみ）
-    -- 負荷軽減: 0.02秒間隔でスキップ
     local t = now()
     if p.status == 1 then
-        if t - state.last_action_time < 0.02 then
-            return
-        end
-        state.last_action_time = t
-        
         local my_target = windower.ffxi.get_mob_by_target('t')
         if my_target then
             local includes_my_target = false
@@ -1616,6 +1609,12 @@ windower.register_event('action', function(act)
                 end
             end
             if includes_my_target then
+                -- 負荷軽減: 関連するアクションのみ 0.02秒間隔でスキップ
+                if t - state.last_action_time < 0.02 then
+                    return
+                end
+                state.last_action_time = t
+                
                 -- ignore Mix: Dark Potion (id 4260)
                 if not (act.param and act.param == 4260) then
                     if is_friendly_actor(act.actor_id) then

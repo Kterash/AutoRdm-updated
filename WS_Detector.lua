@@ -125,14 +125,14 @@ local function get_ws_name_and_props(act, hit)
         ws_name    = ma_entry.ja or ma_entry.en or ('WSID:' .. tostring(wsid))
         actor_type = 'face'
 
-        local count = 0
+        local props_count = 0
         for _, p_sc in ipairs({
             ma_entry.skillchain_a,
             ma_entry.skillchain_b,
             ma_entry.skillchain_c,
         }) do
-            count = count + 1
-            if count > 10 then
+            props_count = props_count + 1
+            if props_count > 3 then
                 break
             end
             if p_sc and p_sc ~= "" then
@@ -141,10 +141,10 @@ local function get_ws_name_and_props(act, hit)
         end
 
         if ma_entry.skillchain and #props == 0 then
-            count = 0
+            local skillchain_count = 0
             for _, p_sc in ipairs(ma_entry.skillchain) do
-                count = count + 1
-                if count > 10 then
+                skillchain_count = skillchain_count + 1
+                if skillchain_count > 10 then
                     break
                 end
                 if p_sc and p_sc ~= "" then
@@ -163,14 +163,14 @@ local function get_ws_name_and_props(act, hit)
         ws_name    = ws_res.ja or ws_res.en or ('WSID:' .. tostring(wsid))
         actor_type = 'pc'
 
-        local count = 0
+        local props_count = 0
         for _, p_sc in ipairs({
             ws_res.skillchain_a,
             ws_res.skillchain_b,
             ws_res.skillchain_c,
         }) do
-            count = count + 1
-            if count > 10 then
+            props_count = props_count + 1
+            if props_count > 3 then
                 break
             end
             if p_sc and p_sc ~= "" then
@@ -286,13 +286,13 @@ local function determine_skillchain_sc(props1, props2)
     local count1 = 0
     for _, p1 in ipairs(props1) do
         count1 = count1 + 1
-        if count1 > 10 then
+        if count1 > 3 then
             break
         end
         local count2 = 0
         for _, p2 in ipairs(props2) do
             count2 = count2 + 1
-            if count2 > 10 then
+            if count2 > 3 then
                 break
             end
             local row = SC_COMBO[p1]
