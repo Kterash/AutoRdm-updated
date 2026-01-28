@@ -5,7 +5,7 @@
 
 _addon.name     = 'AutoRdm'
 _addon.author   = 'Kazuhiro+Copilot'
-_addon.version  = '5.24'
+_addon.version  = '5.25'
 _addon.commands = {'ardm'}
 
 ------------------------------------------------------------
@@ -1611,13 +1611,13 @@ windower.register_event('action', function(act)
             if includes_my_target then
                 -- 負荷軽減: 関連するアクションのみ 0.02秒間隔でスキップ
                 local last_time = state.last_action_time or 0
-                state.last_action_time = t
-                if t - last_time < 0.02 then
-                    return
+                local should_process_mb = (t - last_time >= 0.02)
+                if should_process_mb then
+                    state.last_action_time = t
                 end
                 
                 -- ignore Mix: Dark Potion (id 4260)
-                if not (act.param and act.param == 4260) then
+                if should_process_mb and not (act.param and act.param == 4260) then
                     if is_friendly_actor(act.actor_id) then
                         local parsed = detect_with_wsdetector(act, state.mbset.last_props, nil, nil, false)
                         if parsed then
