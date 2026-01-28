@@ -30,6 +30,13 @@ local JOB_NIN = 13
 local JOB_BLM = 4
 
 ------------------------------------------------------------
+-- 安全制限（無限ループ防止）
+------------------------------------------------------------
+local MAX_ITERATIONS = 100          -- ループの最大反復回数
+local MAX_PARTY_MEMBERS = 18        -- パーティメンバーの最大数
+local MAX_TARGETS = 50              -- ターゲットリストの最大数
+
+------------------------------------------------------------
 -- spells（必要最小限の魔法定義）
 ------------------------------------------------------------
 local spells = {
@@ -67,7 +74,12 @@ local BUFF_DOOM      = 15
 local function has_action_blocking_debuff()
     local p = windower.ffxi.get_player()
     local buffs = p and p.buffs or {}
+    local count = 0
     for _, b in ipairs(buffs) do
+        count = count + 1
+        if count > MAX_ITERATIONS then
+            break
+        end
         if b == BUFF_PARALYSIS or b == BUFF_SILENCE or b == BUFF_MUTE
         or b == BUFF_STUN or b == BUFF_TERROR or b == BUFF_DOOM then
             return true
@@ -106,7 +118,12 @@ local function can_cast(id)
 end
 
 local function has_buff(id)
+    local count = 0
     for _, b in ipairs(get_buffs()) do
+        count = count + 1
+        if count > MAX_ITERATIONS then
+            break
+        end
         if b == id then
             return true
         end
@@ -126,7 +143,12 @@ local monster_abilities_by_message = nil
 
 local function build_monster_abilities_by_message()
     monster_abilities_by_message = {}
+    local count = 0
     for id, ws in pairs(res.monster_abilities) do
+        count = count + 1
+        if count > MAX_ITERATIONS * 50 then
+            break
+        end
         if ws.message and ws.message ~= 0 then
             monster_abilities_by_message[ws.message] = id
         end
@@ -164,6 +186,7 @@ local state = {
 
     last_prerender_time = 0,
     last_prerender_tick = 0,
+    last_action_time = 0,  -- アクションイベント負荷軽減用
 
     ws = {
         active           = false,
@@ -366,8 +389,9 @@ local function find_lowest_hp_target()
     local lowest_hpp = 100
     local lowest_target = nil
     
-    -- Check all party members (p0-p5)
-    for i = 0, 5 do
+    -- Check all party members (p0-p5), with safety limit
+    local max_check = math.min(5, MAX_PARTY_MEMBERS - 1)
+    for i = 0, max_check do
         local member = party['p' .. i]
         if member and member.mob then
             local status = member.mob.status or 0
@@ -1569,11 +1593,23 @@ windower.register_event('action', function(act)
     end
 
     -- MB 検出（戦闘中・自分のターゲットに対する action のみ）
+    -- 負荷軽減: 0.02秒間隔でスキップ
+    local t = now()
     if p.status == 1 then
+        if t - state.last_action_time < 0.02 then
+            return
+        end
+        state.last_action_time = t
+        
         local my_target = windower.ffxi.get_mob_by_target('t')
         if my_target then
             local includes_my_target = false
+            local count = 0
             for _, tgt in ipairs(act.targets or {}) do
+                count = count + 1
+                if count > MAX_TARGETS then
+                    break
+                end
                 if tgt.id == my_target.id then
                     includes_my_target = true
                     break
@@ -1690,7 +1726,12 @@ windower.register_event('action', function(act)
         if not my_target then return end
 
         local hit_flag = false
+        local count = 0
         for _, tgt in ipairs(act.targets or {}) do
+            count = count + 1
+            if count > MAX_TARGETS then
+                break
+            end
             if tgt.id == my_target.id then
                 hit_flag = true
                 break
