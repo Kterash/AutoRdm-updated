@@ -204,6 +204,7 @@ local function complete_judge(result)
     -- コールバックがあれば実行
     if state.on_complete_callback then
         state.on_complete_callback(result, state.source_set)
+        state.on_complete_callback = nil  -- Clear callback after execution
     end
 end
 
@@ -282,6 +283,27 @@ function magic_judge.consume_result_for(source_set)
         return r
     end
     return nil
+end
+
+------------------------------------------------------------
+-- リセット（キャンセル時などに使用）
+------------------------------------------------------------
+function magic_judge.reset()
+    -- Execute callback with "cancelled" result if one exists
+    if state.on_complete_callback and state.active then
+        state.on_complete_callback("fail", state.source_set)
+    end
+    
+    state.active      = false
+    state.spell_name  = nil
+    state.source_set  = nil
+    state.start_time  = 0
+    state.last_result         = nil
+    state.last_result_src     = nil
+    state.mp_before = 0
+    state.mp_after  = 0
+    state.mp_decreased = false
+    state.on_complete_callback = nil
 end
 
 return magic_judge

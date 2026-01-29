@@ -360,6 +360,10 @@ local function can_start_special()
     return true, nil
 end
 
+local function can_act()
+    return not (magic_judge and magic_judge.state and magic_judge.state.active)
+end
+
 local function is_any_spell_casting()
     if magic_judge and magic_judge.state and magic_judge.state.active then return true end
     if state.current_special and state.current_special.name then return true end
@@ -1004,10 +1008,8 @@ ws_set_off = function(suppress_log)
     w.logged_reservation = false
     w.retry_wait_logged = false
 
-    if magic_judge and magic_judge.state then
-        magic_judge.state.active = false
-        magic_judge.state.last_result = nil
-        magic_judge.state.last_result_src = nil
+    if magic_judge and magic_judge.reset then
+        magic_judge.reset()
     end
     if ws_judge and ws_judge.state then
         ws_judge.state.active = false
