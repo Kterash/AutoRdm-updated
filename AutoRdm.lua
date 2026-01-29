@@ -313,9 +313,9 @@ local SPECIAL_PRIORITY = {
 local DELAYS = {
     -- 詠唱成功後のディレイ
     AFTER_SPECIAL_SUCCESS = 3.0,
-    AFTER_MB_SUCCESS = 3.0,
+    AFTER_MB_SUCCESS = 4.0,
     AFTER_WS_SUCCESS = 3.0,
-    AFTER_ENHANCEMENT_SUCCESS = 3.0,
+    AFTER_ENHANCEMENT_SUCCESS = 4.0,
     AFTER_AUTOBUFF_SUCCESS = 6.0,
     
     -- 詠唱失敗後のディレイ
@@ -868,7 +868,7 @@ local function buffset_cast_next(list)
         return
     end
 
-    if now() - (state.buffset_last_finish_time or 0) < 3.0 then
+    if now() - (state.buffset_last_finish_time or 0) < 4.0 then
         return
     end
 

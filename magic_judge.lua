@@ -141,6 +141,11 @@ function magic_judge.check_mp()
 end
 
 ------------------------------------------------------------
+-- 完了処理（成功・失敗共通）の前方宣言
+------------------------------------------------------------
+local complete_judge
+
+------------------------------------------------------------
 -- タイムアウトチェック
 ------------------------------------------------------------
 function magic_judge.check_timeout()
@@ -196,7 +201,7 @@ end
 ------------------------------------------------------------
 -- 完了処理（成功・失敗共通）
 ------------------------------------------------------------
-local function complete_judge(result)
+complete_judge = function(result)
     state.active = false
     state.last_result     = result
     state.last_result_src = state.source_set
