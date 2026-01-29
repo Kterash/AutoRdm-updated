@@ -1354,7 +1354,7 @@ local function try_start_mb1(spell_name, target, opts)
     send_cmd(('input /ma "%s" %s'):format(spell_name, target))
     log_msg('report', '【MB】', spell_name, 'MB1 詠唱開始')
 
-    state.mbset.mb2_time = state.mbset.mb1_start_time + 4.5
+    state.mbset.mb2_time = state.mbset.mb1_start_time + 2.0
 
     -- awaiting_mb2 は mb2_spell が決まっているかで判定（MB決定時に設定されることが多い）
     state.mbset.awaiting_mb2 = (state.mbset.mb2_spell ~= nil)
@@ -1857,7 +1857,7 @@ local function handle_spell_finish(act)
             -- MB1 完了後: MB2 が設定されていれば時間を確保、なければ MB セッションを終了しバフ復帰
             if m.mb2_spell then
                 if m.mb2_time == 0 then
-                    m.mb2_time = now() + 4.0
+                    m.mb2_time = now() + 2.0
                 end
                 -- 現在 MB2 を待機中フラグを有効にしておく
                 m.awaiting_mb2 = true
