@@ -312,27 +312,27 @@ local SPECIAL_PRIORITY = {
 ------------------------------------------------------------
 local DELAYS = {
     -- 詠唱成功後のディレイ
-    AFTER_SPECIAL_SUCCESS = 3.0,
+    AFTER_SPECIAL_SUCCESS = 4.0,
     AFTER_MB_SUCCESS = 4.0,
-    AFTER_WS_SUCCESS = 3.0,
+    AFTER_WS_SUCCESS = 4.0,
     AFTER_ENHANCEMENT_SUCCESS = 4.0,
     AFTER_AUTOBUFF_SUCCESS = 6.0,
     
     -- 詠唱失敗後のディレイ
-    AFTER_SPECIAL_FAIL = 2.0,
-    AFTER_MB_FAIL = 2.0,
-    AFTER_WS_FAIL = 2.0,
-    AFTER_ENHANCEMENT_FAIL = 2.0,
+    AFTER_SPECIAL_FAIL = 4.0,
+    AFTER_MB_FAIL = 4.0,
+    AFTER_WS_FAIL = 4.0,
+    AFTER_ENHANCEMENT_FAIL = 4.0,
     AFTER_AUTOBUFF_FAIL = 6.0,
     
     -- 詠唱不可判定後のディレイ
-    AFTER_CAST_IMPOSSIBLE = 1.0,
+    AFTER_CAST_IMPOSSIBLE = 2.0,
     
     -- WSモーション後のディレイ
-    AFTER_WS_MOTION = 3.0,
+    AFTER_WS_MOTION = 4.0,
     
     -- 安全タイムアウト
-    SAFETY_TIMEOUT_SPECIAL = 8.0,
+    SAFETY_TIMEOUT_SPECIAL = 5.0,
     SAFETY_TIMEOUT_OTHER = 5.0,
 }
 
