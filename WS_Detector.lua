@@ -9,11 +9,6 @@
 local WS_Detector = {}
 
 ------------------------------------------------------------
--- 安全制限（無限ループ防止）
-------------------------------------------------------------
-local MAX_ITERATIONS = 5000  -- リソースルックアップの最大反復回数
-
-------------------------------------------------------------
 -- 1. Skillchains式 成功判定（旧ロジック）
 ------------------------------------------------------------
 
@@ -104,12 +99,7 @@ local function get_ws_name_and_props(act, hit)
         local ma_entry = res.monster_abilities[wsid]
 
         if (not ma_entry) and hit and hit.message then
-            local count = 0
             for id, ws in pairs(res.monster_abilities) do
-                count = count + 1
-                if count > MAX_ITERATIONS then
-                    break
-                end
                 if ws.message == hit.message then
                     ma_entry = ws
                     wsid = id
@@ -125,28 +115,18 @@ local function get_ws_name_and_props(act, hit)
         ws_name    = ma_entry.ja or ma_entry.en or ('WSID:' .. tostring(wsid))
         actor_type = 'face'
 
-        local props_count = 0
         for _, p_sc in ipairs({
             ma_entry.skillchain_a,
             ma_entry.skillchain_b,
             ma_entry.skillchain_c,
         }) do
-            props_count = props_count + 1
-            if props_count > 3 then
-                break
-            end
             if p_sc and p_sc ~= "" then
                 table.insert(props, p_sc)
             end
         end
 
         if ma_entry.skillchain and #props == 0 then
-            local skillchain_count = 0
             for _, p_sc in ipairs(ma_entry.skillchain) do
-                skillchain_count = skillchain_count + 1
-                if skillchain_count > 10 then
-                    break
-                end
                 if p_sc and p_sc ~= "" then
                     table.insert(props, p_sc)
                 end
@@ -163,16 +143,11 @@ local function get_ws_name_and_props(act, hit)
         ws_name    = ws_res.ja or ws_res.en or ('WSID:' .. tostring(wsid))
         actor_type = 'pc'
 
-        local props_count = 0
         for _, p_sc in ipairs({
             ws_res.skillchain_a,
             ws_res.skillchain_b,
             ws_res.skillchain_c,
         }) do
-            props_count = props_count + 1
-            if props_count > 3 then
-                break
-            end
             if p_sc and p_sc ~= "" then
                 table.insert(props, p_sc)
             end
@@ -283,18 +258,8 @@ local SC_COMBO = {
 local function determine_skillchain_sc(props1, props2)
     if not props1 or not props2 then return nil end
 
-    local count1 = 0
     for _, p1 in ipairs(props1) do
-        count1 = count1 + 1
-        if count1 > 3 then
-            break
-        end
-        local count2 = 0
         for _, p2 in ipairs(props2) do
-            count2 = count2 + 1
-            if count2 > 3 then
-                break
-            end
             local row = SC_COMBO[p1]
             local sc  = row and row[p2]
             if sc then
@@ -309,20 +274,20 @@ end
 ------------------------------------------------------------
 
 local MB_MAP = {
-    ["光"]   = {mb3="サンダーIII", mb2="サンダーII"},
-    ["闇"]   = {mb3="ブリザドIII", mb2="ブリザドII"},
-    ["湾曲"] = {mb3="ブリザドIII", mb2="ブリザドII"},
-    ["分解"] = {mb3="サンダーIII", mb2="サンダーII"},
-    ["核熱"] = {mb3="ファイアIII", mb2="ファイアII"},
-    ["重力"] = {mb3="ストーンIII", mb2="ストーンII"},
-    ["溶解"] = {mb3="ファイアIII",  mb2="ファイアII"},
-    ["硬化"] = {mb3="ブリザドIII",  mb2="ブリザドII"},
-    ["炸裂"] = {mb3="エアロIII",    mb2="エアロII"},
-    ["衝撃"] = {mb3="サンダーIII",  mb2="サンダーII"},
-    ["切断"] = {mb3="ストーンIII",  mb2="ストーンII"},
-    ["振動"] = {mb3="ウォータIII",  mb2="ウォータII"},
-    ["圧縮"] = {mb3="ブリザドIII",  mb2="ブリザドII"},
-    ["貫通"] = {mb3="サンダーIII",  mb2="サンダーII"},
+    ["光"]   = {mb3="サンダーIV", mb2="サンダーII"},
+    ["闇"]   = {mb3="ブリザドIV", mb2="ブリザドII"},
+    ["湾曲"] = {mb3="ブリザドIV", mb2="ブリザドII"},
+    ["分解"] = {mb3="サンダーIV", mb2="サンダーII"},
+    ["核熱"] = {mb3="ファイアIV", mb2="ファイアII"},
+    ["重力"] = {mb3="ストーンIV", mb2="ストーンII"},
+    ["溶解"] = {mb3="ファイアIV",  mb2="ファイアII"},
+    ["硬化"] = {mb3="ブリザドIV",  mb2="ブリザドII"},
+    ["炸裂"] = {mb3="エアロIV",    mb2="エアロII"},
+    ["衝撃"] = {mb3="サンダーIV",  mb2="サンダーII"},
+    ["切断"] = {mb3="ストーンIV",  mb2="ストーンII"},
+    ["振動"] = {mb3="ウォータIV",  mb2="ウォータII"},
+    ["圧縮"] = {mb3="ブリザドIV",  mb2="ブリザドII"},
+    ["貫通"] = {mb3="サンダーIV",  mb2="サンダーII"},
 }
 
 local function select_mb_magic(sc_ja)

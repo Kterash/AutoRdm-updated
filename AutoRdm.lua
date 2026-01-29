@@ -5,7 +5,7 @@
 
 _addon.name     = 'AutoRdm'
 _addon.author   = 'Kazuhiro+Copilot'
-_addon.version  = '5.25'
+_addon.version  = '5.23'
 _addon.commands = {'ardm'}
 
 ------------------------------------------------------------
@@ -28,13 +28,6 @@ local bit = require('bit')
 local JOB_RDM = 5
 local JOB_NIN = 13
 local JOB_BLM = 4
-
-------------------------------------------------------------
--- 安全制限（無限ループ防止）
-------------------------------------------------------------
-local MAX_ITERATIONS = 100          -- ループの最大反復回数
-local MAX_RESOURCE_ITERATIONS = 5000 -- リソースルックアップの最大反復回数
-local MAX_TARGETS = 50              -- ターゲットリストの最大数
 
 ------------------------------------------------------------
 -- spells（必要最小限の魔法定義）
@@ -74,12 +67,7 @@ local BUFF_DOOM      = 15
 local function has_action_blocking_debuff()
     local p = windower.ffxi.get_player()
     local buffs = p and p.buffs or {}
-    local count = 0
     for _, b in ipairs(buffs) do
-        count = count + 1
-        if count > MAX_ITERATIONS then
-            break
-        end
         if b == BUFF_PARALYSIS or b == BUFF_SILENCE or b == BUFF_MUTE
         or b == BUFF_STUN or b == BUFF_TERROR or b == BUFF_DOOM then
             return true
@@ -118,12 +106,7 @@ local function can_cast(id)
 end
 
 local function has_buff(id)
-    local count = 0
     for _, b in ipairs(get_buffs()) do
-        count = count + 1
-        if count > MAX_ITERATIONS then
-            break
-        end
         if b == id then
             return true
         end
@@ -143,12 +126,7 @@ local monster_abilities_by_message = nil
 
 local function build_monster_abilities_by_message()
     monster_abilities_by_message = {}
-    local count = 0
     for id, ws in pairs(res.monster_abilities) do
-        count = count + 1
-        if count > MAX_RESOURCE_ITERATIONS then
-            break
-        end
         if ws.message and ws.message ~= 0 then
             monster_abilities_by_message[ws.message] = id
         end
@@ -186,7 +164,6 @@ local state = {
 
     last_prerender_time = 0,
     last_prerender_tick = 0,
-    last_action_time = 0,  -- アクションイベント負荷軽減用
 
     ws = {
         active           = false,
@@ -313,7 +290,7 @@ state.mbset = {
     active = false,
     count = 0,
     last_ws_time = 0,
-    thresholds = {10,9,8,7},
+    thresholds = {11,10,9,8},
     pending_mb1 = false,
     mb1_spell = nil,
     mb2_spell = nil,
@@ -1592,32 +1569,19 @@ windower.register_event('action', function(act)
     end
 
     -- MB 検出（戦闘中・自分のターゲットに対する action のみ）
-    local t = now()
     if p.status == 1 then
         local my_target = windower.ffxi.get_mob_by_target('t')
         if my_target then
             local includes_my_target = false
-            local count = 0
             for _, tgt in ipairs(act.targets or {}) do
-                count = count + 1
-                if count > MAX_TARGETS then
-                    break
-                end
                 if tgt.id == my_target.id then
                     includes_my_target = true
                     break
                 end
             end
             if includes_my_target then
-                -- 負荷軽減: 関連するアクションのみ 0.02秒間隔でスキップ
-                local last_time = state.last_action_time or 0
-                local should_process_mb = (t - last_time >= 0.02)
-                if should_process_mb then
-                    state.last_action_time = t
-                end
-                
                 -- ignore Mix: Dark Potion (id 4260)
-                if should_process_mb and not (act.param and act.param == 4260) then
+                if not (act.param and act.param == 4260) then
                     if is_friendly_actor(act.actor_id) then
                         local parsed = detect_with_wsdetector(act, state.mbset.last_props, nil, nil, false)
                         if parsed then
@@ -1726,12 +1690,7 @@ windower.register_event('action', function(act)
         if not my_target then return end
 
         local hit_flag = false
-        local count = 0
         for _, tgt in ipairs(act.targets or {}) do
-            count = count + 1
-            if count > MAX_TARGETS then
-                break
-            end
             if tgt.id == my_target.id then
                 hit_flag = true
                 break

@@ -4,11 +4,6 @@
 local ws_judge = {}
 
 ------------------------------------------------------------
--- 安全制限（キュー溢れ防止）
-------------------------------------------------------------
-local MAX_QUEUE_SIZE = 10  -- キューの最大サイズ
-
-------------------------------------------------------------
 -- 成功 / 失敗メッセージ分類テーブル
 ------------------------------------------------------------
 local SUCCESS_WS = {
@@ -66,10 +61,6 @@ end
 ------------------------------------------------------------
 function ws_judge.start(ws_name, source_set)
     if state.active then
-        -- キューサイズ制限: 上限を超えたら古いエントリを削除
-        if #state.queue >= MAX_QUEUE_SIZE then
-            table.remove(state.queue, 1)
-        end
         table.insert(state.queue, { ws_name = ws_name, source_set = source_set })
         return
     end
