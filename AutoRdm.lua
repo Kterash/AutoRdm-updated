@@ -238,10 +238,6 @@ local state = {
     combatbuff = {
         last_finish_time = 0,
         suspend_until    = 0,
-
-        pending          = false,
-        pending_spell    = nil,
-        pending_target   = nil,
     },
 
     buffset_last_finish_time = 0,
@@ -287,7 +283,6 @@ state.mbset = {
     count = 0,
     last_ws_time = 0,
     thresholds = {11,10,9,8},
-    pending_mb1 = false,
     mb1_spell = nil,
     mb2_spell = nil,
     mb1_target = nil,
@@ -337,7 +332,7 @@ local DELAYS = {
     AFTER_WS_MOTION = 3.0,
     
     -- 安全タイムアウト
-    SAFETY_TIMEOUT_SPECIAL = 5.0,
+    SAFETY_TIMEOUT_SPECIAL = 8.0,
     SAFETY_TIMEOUT_OTHER = 5.0,
 }
 
@@ -573,11 +568,8 @@ local function cast_spell_combatbuff(spell, target)
 
     local ok, reason = can_start_special()
     if not ok then
-        state.combatbuff.pending = true
-        state.combatbuff.pending_spell = spell
-        state.combatbuff.pending_target = target or '<me>'
-        log_msg('notice', '【auto】', spell.name, '予約')
-        return true
+        -- No reservation for auto combat buff - only tick-based check
+        return false
     end
 
     local callback = function(result, source_set)
@@ -661,7 +653,7 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
     end
 
     -- ここで MB が進行中なら完全終了（再開しない）
-    if state.mbset and (state.mbset.active or state.mbset.pending_mb1 or state.mbset.mb1_spell or state.mbset.mb2_spell) then
+    if state.mbset and (state.mbset.active or state.mbset.mb1_spell or state.mbset.mb2_spell) then
         reset_mbset('SP発動により中断')
     end
 
@@ -1261,7 +1253,7 @@ end
 -- Note: reset_mbset is forward-declared above so functions defined earlier can call it.
 reset_mbset = function(reason)
     local m = state.mbset
-    local was_active = m.active or m.mb1_spell or m.mb2_spell or m.pending_mb1
+    local was_active = m.active or m.mb1_spell or m.mb2_spell
     if reason and was_active then
         log_msg('finish', '【MB】', 'MBセット', '完了')
     end
@@ -1272,7 +1264,6 @@ reset_mbset = function(reason)
     --   m.last_ws_time
     --   m.last_props
     m.active = false
-    m.pending_mb1 = false
     m.mb1_spell = nil
     m.mb2_spell = nil
     m.mb1_target = nil
@@ -1302,22 +1293,15 @@ local function try_start_mb1(spell_name, target, opts)
     local force_bypass = opts.force_bypass or false
     target = target or '<t>'
 
+    -- No reservation for MB1 - only tick-based check
     if state.current_special.name and not force_bypass then
-        state.mbset.pending_mb1 = true
-        state.mbset.mb1_spell = spell_name
-        state.mbset.mb1_target = target
-        log_msg('notice', '【MB】', spell_name, '予約')
-        return true
+        return false
     end
 
     if not force_bypass then
         local ok, reason = can_start_special()
         if not ok then
-            state.mbset.pending_mb1 = true
-            state.mbset.mb1_spell = spell_name
-            state.mbset.mb1_target = target
-            log_msg('notice', '【MB】', spell_name, '予約')
-            return true
+            return false
         end
     end
 
@@ -1340,7 +1324,6 @@ local function try_start_mb1(spell_name, target, opts)
     state.mbset.mb1_spell = spell_name
     state.mbset.mb1_target = target
     state.mbset.mb1_start_time = now()
-    state.mbset.pending_mb1 = false
 
     local callback = function(result, source_set)
         if result == "success" then
@@ -1456,7 +1439,7 @@ local function process_analyzed_ws(result, act)
     -- If skillchain detected, ALWAYS terminate current MB set and start new one
     if sc_detected then
         -- Check if there's an active MB set to terminate
-        local was_active = m.active or m.mb1_spell or m.mb2_spell or m.pending_mb1
+        local was_active = m.active or m.mb1_spell or m.mb2_spell
         if was_active then
             reset_mbset('新しい連携を検知; MBセットをリセット')
         end
@@ -1470,7 +1453,6 @@ local function process_analyzed_ws(result, act)
         m.mb2_spell = mb2
         m.mb1_target = '<t>'
         m.mb2_target = '<t>'
-        m.pending_mb1 = true
         m.last_detected_sc = result.sc_en
         m.mb2_time = 0
 
@@ -1495,16 +1477,12 @@ local function process_analyzed_ws(result, act)
         -- MBセット開始ログ
         log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s count=%d', mb1, mb2, result.sc_en, m.count))
 
-        -- Try to start MB1 immediately if possible
+        -- Try to start MB1 immediately if possible (no reservation, tick-based only)
         if not magic_judge.state.active and not state.current_special.name then
             local ok, reason = can_start_special()
             if ok then
                 try_start_mb1(m.mb1_spell, m.mb1_target)
-            else
-                log_msg('notice', '【MB】', m.mb1_spell, '予約')
             end
-        else
-            log_msg('notice', '【MB】', m.mb1_spell, '予約')
         end
         return
     end
@@ -1545,14 +1523,7 @@ local function process_mbset_in_prerender(t)
     local m = state.mbset
     if not m.active then return end
 
-    if m.pending_mb1 and m.mb1_spell then
-        if not magic_judge.state.active and not state.current_special.name then
-            local ok, reason = can_start_special()
-            if ok then
-                try_start_mb1(m.mb1_spell, m.mb1_target)
-            end
-        end
-    end
+    -- No pending processing - MB1 starts immediately or not at all (tick-based only)
 
     if m.mb2_time and m.mb2_time > 0 and t >= m.mb2_time then
         if m.mb2_spell then
@@ -1562,7 +1533,6 @@ local function process_mbset_in_prerender(t)
             end
         end
         m.mb2_time = 0
-        m.pending_mb1 = false
         -- mb1/mb2 cleared after MB2 attempt started; do not reset entire mbset here
         -- m.mb1_spell = nil
         -- m.mb2_spell = nil
@@ -1990,22 +1960,7 @@ windower.register_event('prerender', function()
         magic_judge.check_mp()
     end
 
-    if state.combatbuff.pending and state.combatbuff.pending_spell then
-        local ok, reason = can_start_special()
-        if ok then
-            local sp = state.combatbuff.pending_spell
-            local tgt = state.combatbuff.pending_target
-            state.combatbuff.pending = false
-            state.combatbuff.pending_spell = nil
-            state.combatbuff.pending_target = nil
-
-            if cast_spell_combatbuff(sp, tgt) then
-                log_msg('report', '【SP】', sp.name, '予約実行')
-            else
-                log_msg('abort', '【SP】', sp.name, '予約実行失敗')
-            end
-        end
-    end
+    -- No pending processing for combat buff - tick-based only
 
     -- Safety timeout for special spells (using magic_judge.state.active)
     if state.current_special.name and state.current_special.start_time and t - state.current_special.start_time > DELAYS.SAFETY_TIMEOUT_SPECIAL then
@@ -2309,10 +2264,6 @@ function reset_all_states()
     state.buff_resume_time = 0
     state.combatbuff.last_finish_time = 0
     state.combatbuff.suspend_until = nil
-
-    state.combatbuff.pending = false
-    state.combatbuff.pending_spell = nil
-    state.combatbuff.pending_target = nil
 
     state.buffset_last_finish_time = 0
 
