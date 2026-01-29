@@ -97,6 +97,9 @@ local state = {
     mp_before = 0,
     mp_after  = 0,
     mp_decreased = false,
+    
+    -- コールバック: 完了・失敗時にディレイを設定
+    on_complete_callback = nil,
 }
 
 magic_judge.state = state
@@ -104,7 +107,7 @@ magic_judge.state = state
 ------------------------------------------------------------
 -- 監視開始
 ------------------------------------------------------------
-function magic_judge.start(spell_name, source_set)
+function magic_judge.start(spell_name, source_set, on_complete_callback)
     state.active      = true
     state.spell_name  = spell_name
     state.source_set  = source_set
@@ -117,6 +120,8 @@ function magic_judge.start(spell_name, source_set)
     state.mp_before = p and p.vitals.mp or 0
     state.mp_after  = state.mp_before
     state.mp_decreased = false
+    
+    state.on_complete_callback = on_complete_callback
 end
 
 ------------------------------------------------------------
@@ -145,9 +150,7 @@ function magic_judge.check_timeout()
     local elapsed = now - state.start_time
 
     if elapsed >= 1.5 then
-        state.active = false
-        state.last_result     = "fail"
-        state.last_result_src = state.source_set
+        complete_judge("fail")
     end
 end
 
@@ -191,6 +194,20 @@ local function is_fail(hit, act)
 end
 
 ------------------------------------------------------------
+-- 完了処理（成功・失敗共通）
+------------------------------------------------------------
+local function complete_judge(result)
+    state.active = false
+    state.last_result     = result
+    state.last_result_src = state.source_set
+    
+    -- コールバックがあれば実行
+    if state.on_complete_callback then
+        state.on_complete_callback(result, state.source_set)
+    end
+end
+
+------------------------------------------------------------
 -- action イベント
 ------------------------------------------------------------
 function magic_judge.on_action(act)
@@ -210,9 +227,7 @@ function magic_judge.on_action(act)
     -- 成功判定
     --------------------------------------------------------
     if is_success(hit, act) then
-        state.active = false
-        state.last_result     = "success"
-        state.last_result_src = state.source_set
+        complete_judge("success")
         return
     end
 
@@ -220,9 +235,7 @@ function magic_judge.on_action(act)
     -- 失敗判定
     --------------------------------------------------------
     if is_fail(hit, act) then
-        state.active = false
-        state.last_result     = "fail"
-        state.last_result_src = state.source_set
+        complete_judge("fail")
         return
     end
 end
@@ -250,9 +263,7 @@ windower.register_event('incoming chunk', function(id, data)
 
     -- FAIL_CAST に該当する詠唱不可メッセージ
     if FAIL_CAST[msg_id] then
-        state.active = false
-        state.last_result     = "fail"
-        state.last_result_src = state.source_set
+        complete_judge("fail")
     end
 end)
 
