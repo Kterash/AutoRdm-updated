@@ -623,7 +623,7 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
         return
     end
 
-    -- SP 実行時は WS/BUFFSET だけでなく MB も中断（完全終了）して再開しない
+    -- ①: SP 実行時は WS/BUFFSET だけでなく MB も中断（完全終了）して再開しない
     if state.ws.active then
         log_msg('abort', '【WS】', 'WSセット', '中断', 'SP発動のため停止')
         ws_set_off()
@@ -643,14 +643,11 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
     end
 
     state.suspend_buffs = true
-    state.combatbuff.casting = false
 
     reset_retry()
 
     local t = now()
-    state.casting = true
     state.last_spell = name
-    state.cast_fail_time = t + 2.0
 
     state.current_special.name = name
     state.current_special.priority = SPECIAL_PRIORITY[name] or 999
@@ -669,6 +666,7 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
         interval   = 0.5,
         kind       = 'special',
         from_queue = is_from_queue,
+        priority   = SPECIAL_PRIORITY[name] or 999,
     }
 
     state.queued_special.name = nil
@@ -717,22 +715,28 @@ end)
 ------------------------------------------------------------
 -- 戦闘バフ処理（process_buffs）
 ------------------------------------------------------------
+------------------------------------------------------------
+-- 戦闘バフ処理（process_buffs）
+-- ②: combatbuff.casting を廃止
+-- ⑥e: 独自インターバル 6秒
+------------------------------------------------------------
 local function process_buffs()
     local p = get_player()
     if not p then return end
     if has_action_blocking_debuff() then return end
     if not state.first_hit_done then return end
 
+    -- ①: 優先度チェック（スペシャル・強化セットが進行中なら実行しない）
     if state.current_special.name then return end
     if state.buffset.active then return end
     if state.suspend_buffs then return end
 
-    if state.combatbuff.casting then return end
-
-    if state.combatbuff.last_finish_time > 0 and now() - state.combatbuff.last_finish_time < 6 then
+    -- ⑥e: 戦闘バフは独自のインターバル 6秒をとる
+    if state.combatbuff.last_finish_time > 0 and now() - state.combatbuff.last_finish_time < DELAY_CONFIG.combatbuff_interval then
         return
     end
 
+    -- ⑤: can_start_special を確認
     local ok, reason = can_start_special()
     if not ok then
         return
@@ -817,11 +821,16 @@ local BUFFET_LIST_COMBAT = {
 
 local BUFFET_TIMEOUT = 3.0
 
+------------------------------------------------------------
+-- buffset_cast_next
+-- ⑥d: ディレイタイム方式から can_start_special をみて実行タイミングを計る方式に変更
+------------------------------------------------------------
 local function buffset_cast_next(list)
     local step  = state.buffset.step
     local entry = list[step]
     if not entry then return end
 
+    -- ①: 上位優先度チェック
     if state.current_special.name then return end
 
     if entry.name == "__CANCEL_STONESKIN__" then
@@ -832,16 +841,10 @@ local function buffset_cast_next(list)
         return
     end
 
-    if step == 1 and entry.name == "ヘイス��II" then
-        local ok, reason = can_start_special()
-        if not ok then
-            state.buffset.next_time = now() + 0.5
-            return
-        end
-    end
-
-    if not can_act() then
-        state.buffset.next_time = now() + 1.0
+    -- ⑤⑥d: can_start_special を確認して実行タイミングを計る
+    local ok, reason = can_start_special()
+    if not ok then
+        state.buffset.next_time = now() + 0.5
         return
     end
 
@@ -858,7 +861,7 @@ local function buffset_cast_next(list)
     cast_spell(
         { name = entry.name, recast_id = spell and spell.recast_id or nil },
         '<me>',
-        { max_count = 1, kind = 'buffset' }
+        { max_count = 1, kind = 'buffset', source_set = 'buffset' }
     )
 
     local t = now()
@@ -1274,19 +1277,28 @@ local function reset_ws_chain()
     m.last_props = nil
 end
 
+------------------------------------------------------------
+-- try_start_mb1 / try_start_mb2
+-- ②: state.casting を廃止し magic_judge を使用
+-- ⑤: can_start_special を確認
+-- ⑥b-1: MB1のみ予約あり
+------------------------------------------------------------
 local function try_start_mb1(spell_name, target, opts)
     opts = opts or {}
     local force_bypass = opts.force_bypass or false
     target = target or '<t>'
 
+    -- ①: スペシャル魔法進行中なら MB1 を予約
     if state.current_special.name and not force_bypass then
         state.mbset.pending_mb1 = true
         state.mbset.mb1_spell = spell_name
         state.mbset.mb1_target = target
-        log_msg('notice', '【MB】', spell_name, '予約')
+        state.mbset.reserved_during_special = true
+        log_msg('notice', '【MB】', spell_name, 'スペシャル魔法中に予約')
         return true
     end
 
+    -- ⑤: can_start_special を確認
     if not force_bypass then
         local ok, reason = can_start_special()
         if not ok then
@@ -1298,6 +1310,7 @@ local function try_start_mb1(spell_name, target, opts)
         end
     end
 
+    -- ①: MB セット開始時は WS/BUFFSET を中断
     if state.ws.active then
         --log_msg('report', '【WS】', 'WSセット', '中断', 'MBセット発動')
         ws_set_off()
@@ -1313,21 +1326,22 @@ local function try_start_mb1(spell_name, target, opts)
     state.suspend_buffs = true
 
     local t = now()
-    state.casting = true
     state.last_spell = spell_name
-    state.cast_fail_time = t + 2.0
 
     state.mbset.mb1_spell = spell_name
     state.mbset.mb1_target = target
     state.mbset.mb1_start_time = now()
     state.mbset.pending_mb1 = false
 
+    -- ②: magic_judge でモニタリング開始
+    magic_judge.start(spell_name, 'mbset')
+    
     send_cmd(('input /ma "%s" %s'):format(spell_name, target))
     log_msg('report', '【MB】', spell_name, 'MB1 詠唱開始')
 
-    state.mbset.mb2_time = state.mbset.mb1_start_time + 4.5
+    -- ⑥b-2: MB2 は MB1発動2秒後に実行
+    state.mbset.mb2_time = state.mbset.mb1_start_time + DELAY_CONFIG.mb2_after_mb1 + 2.5
 
-    -- awaiting_mb2 は mb2_spell が決まっているかで判定（MB決定時に設定されることが多い）
     state.mbset.awaiting_mb2 = (state.mbset.mb2_spell ~= nil)
 
     return true
@@ -1341,12 +1355,20 @@ local function try_start_mb2(spell_name, target)
         return false
     end
 
-    state.casting = true
+    -- ⑤: can_start_special を確認
+    local ok, reason = can_start_special()
+    if not ok then
+        log_msg('abort', '【MB】', spell_name, 'MB2 中止', reason or '実行不可')
+        return false
+    end
+
     state.last_spell = spell_name
-    state.cast_fail_time = t + 2.0
 
     state.mbset.mb2_spell = spell_name
     state.mbset.mb2_target = target
+
+    -- ②: magic_judge でモニタリング開始
+    magic_judge.start(spell_name, 'mbset')
 
     send_cmd(('input /ma "%s" %s'):format(spell_name, target))
     log_msg('report', '【MB】', spell_name, 'MB2 詠唱開始')
@@ -1500,12 +1522,17 @@ local function process_analyzed_ws(result, act)
     m.last_props = result.props
 end
 
+------------------------------------------------------------
+-- process_mbset_in_prerender
+-- ⑤: can_start_special を確認してMB実行
+------------------------------------------------------------
 local function process_mbset_in_prerender(t)
     local m = state.mbset
     if not m.active then return end
 
+    -- ⑥b-1: MB1の予約があれば実行を試みる
     if m.pending_mb1 and m.mb1_spell then
-        if not state.casting and not state.current_special.name then
+        if not state.current_special.name then
             local ok, reason = can_start_special()
             if ok then
                 try_start_mb1(m.mb1_spell, m.mb1_target)
@@ -1513,15 +1540,13 @@ local function process_mbset_in_prerender(t)
         end
     end
 
+    -- ⑥b-2: MB2 は MB1発動2秒後に実行
     if m.mb2_time and m.mb2_time > 0 and t >= m.mb2_time then
         if m.mb2_spell then
             try_start_mb2(m.mb2_spell, m.mb2_target)
         end
         m.mb2_time = 0
         m.pending_mb1 = false
-        -- mb1/mb2 cleared after MB2 attempt started; do not reset entire mbset here
-        -- m.mb1_spell = nil
-        -- m.mb2_spell = nil
     end
 
     -- タイムアウト判定: MB2 を待っている場合は短期タイムアウトを抑制し、長期タイムアウトのみ許容
@@ -1566,12 +1591,10 @@ windower.register_event('action', function(act)
     end
 
     if act.actor_id == p.id and act.category == 6 then
-        if state.combatbuff.casting then
-            state.combatbuff.casting = false
-            state.combatbuff.start_time = nil
-            log_msg('abort', '【auto】', '戦闘バフ', '詠唱中断')
-        end
-        state.magic_delay_until = now() + 2.0
+        -- 魔法詠唱中断時（②: magic_judge が処理するのでここでは記録のみ）
+        log_msg('abort', '【magic】', '魔法', '詠唱中断')
+        -- ②: ディレイ設定は special_delay_until に統一
+        state.special_delay_until = now() + DELAY_CONFIG.magic_complete
     end
 
     if act.actor_id == p.id and act.category == 7 then
@@ -1581,7 +1604,7 @@ windower.register_event('action', function(act)
 
     if act.actor_id == p.id and act.category == 3 then
         state.ws_motion = false
-        state.ws_delay_until = now() + 3.0
+        state.ws_delay_until = now() + DELAY_CONFIG.ws_complete
     end
 
     if not (act.category == 3 or act.category == 7 or act.category == 11 or act.category == 1 or act.category == 12 or act.category == 13) then
@@ -1774,6 +1797,11 @@ end)
 -- 魔法完了 / 中断 ハンドラ（handle_spell_finish）
 -- MB2完了時は終了ログを出す。MB1のみで終了/その他異常終了時も終了ログ。
 ------------------------------------------------------------
+------------------------------------------------------------
+-- 魔法完了 / 中断 ハンドラ（handle_spell_finish）
+-- ②: 全魔法の詠唱完了・中断後に special_delay_until を設定
+-- MB2完了時は終了ログを出す。MB1のみで終了/その他異常終了時も終了ログ。
+------------------------------------------------------------
 local function handle_spell_finish(act)
     local p = get_player()
     if not p then return end
@@ -1784,13 +1812,12 @@ local function handle_spell_finish(act)
     if not spell_res then return end
     local name = spell_res.ja or spell_res.en or ''
 
-    state.casting = false
-    state.cast_fail_time = nil
-
+    -- リトライ中断
     if state.retry.active and name == state.retry.spell_name then
         reset_retry()
     end
 
+    -- スペシャル魔法完了
     if state.current_special.name and name == state.current_special.name then
         log_msg('finish', '【SP】', name, '詠唱完了')
         state.current_special.name = nil
@@ -1800,18 +1827,28 @@ local function handle_spell_finish(act)
         state.current_special.target = nil
         state.current_special.is_sleep2 = false
 
-        state.special_delay_until = now() + 3.0
+        -- ②: スペシャル魔法完了後ディレイを設定
+        state.special_delay_until = now() + DELAY_CONFIG.special_complete
         state.suspend_buffs = false
         state.buff_resume_time = now()
 
         if state.retry.active and state.retry.spell_name == name then
             reset_retry()
         end
+        
+        -- ①: スペシャル魔法終了後、予約されたMB1があれば実行
+        if state.mbset and state.mbset.reserved_during_special and state.mbset.mb1_spell then
+            state.mbset.reserved_during_special = false
+            state.mbset.pending_mb1 = true
+            log_msg('notice', '【MB】', state.mbset.mb1_spell, 'スペシャル魔法終了後にMB1実行')
+        end
         return
     end
 
-    state.magic_delay_until = now() + 3.0
+    -- ②: 通常魔法完了後もディレイを設定（special_delay_until に統一）
+    state.special_delay_until = now() + DELAY_CONFIG.magic_complete
 
+    -- 強化セット: ステップ完了
     if state.buffset.active and state.buffset.waiting_for_finish then
         state.buffset.waiting_for_finish  = false
         state.buffset.step                = state.buffset.next_step_on_finish
@@ -1820,17 +1857,17 @@ local function handle_spell_finish(act)
         state.buffset_last_finish_time    = now()
     end
 
+    -- MB1 完了
     do
         local m = state.mbset
         if m and m.mb1_spell and name == m.mb1_spell then
             log_msg('report', '【MB】', name, '詠唱完了', 'MB1')
             m.mb1_spell = nil
-            -- MB1 完了後: MB2 が設定されていれば時間を確保、なければ MB セッションを終了しバフ復帰
+            -- ⑥b-2: MB2 が設定されていれば MB1発動2秒後に実行
             if m.mb2_spell then
                 if m.mb2_time == 0 then
-                    m.mb2_time = now() + 4.0
+                    m.mb2_time = now() + DELAY_CONFIG.mb2_after_mb1
                 end
-                -- 現在 MB2 を待機中フラグを有効にしておく
                 m.awaiting_mb2 = true
             else
                 reset_mbset('MB1のみで終了')
@@ -1845,9 +1882,10 @@ local function handle_spell_finish(act)
 
     state.last_spell = nil
 
-    if state.combatbuff.casting then
-        state.combatbuff.casting = false
-        state.combatbuff.start_time = nil
+    -- ⑥e: 戦闘バフ完了後は独自のインターバル6秒をとる
+    -- ②: combatbuff.casting は廃止されているが、判定に magic_judge のsource_setを使用
+    local judge_result = magic_judge.consume_result_for('combatbuff')
+    if judge_result then
         state.combatbuff.last_finish_time = now()
         if not state.ws.active then
             log_msg('finish', '【auto】', name, '詠唱完了')
@@ -1972,6 +2010,7 @@ windower.register_event('prerender', function()
         magic_judge.check_mp()
     end
 
+    -- 戦闘バフ予約実行
     if state.combatbuff.pending and state.combatbuff.pending_spell then
         local ok, reason = can_start_special()
         if ok then
@@ -1982,26 +2021,24 @@ windower.register_event('prerender', function()
             state.combatbuff.pending_target = nil
 
             if cast_spell_combatbuff(sp, tgt) then
-                log_msg('report', '【SP】', sp.name, '予約実行')
+                log_msg('report', '【auto】', sp.name, '予約実行')
             else
-                log_msg('abort', '【SP】', sp.name, '予約実行失敗')
+                log_msg('abort', '【auto】', sp.name, '予約実行失敗')
             end
         end
     end
 
-    if state.casting and state.cast_fail_time and t > state.cast_fail_time + 8 then
-        log_msg('abort', '【safety】', '通常魔法', '中断', '8秒以上継続')
-        state.casting = false
-        state.cast_fail_time = nil
+    -- ⑦ 安全装置: magic_judge のタイムアウト（8秒）
+    if magic_judge and magic_judge.state and magic_judge.state.active 
+       and magic_judge.state.start_time and (t - magic_judge.state.start_time) > 8 then
+        log_msg('abort', '【safety】', magic_judge.state.spell_name or '魔法', '中断', '8秒以上継続')
+        magic_judge.state.active = false
+        magic_judge.state.last_result = "fail"
+        magic_judge.state.last_result_src = magic_judge.state.source_set
         reset_retry()
     end
 
-    if state.combatbuff and state.combatbuff.casting and state.combatbuff.start_time and (t - state.combatbuff.start_time) > 5 then
-        state.combatbuff.casting = false
-        state.combatbuff.start_time = nil
-        state.combatbuff.last_finish_time = t
-    end
-
+    -- ⑦ 安全装置: スペシャル魔法のタイムアウト（8秒）
     if state.current_special.name and state.current_special.start_time and t - state.current_special.start_time > 8 then
         log_msg('abort', '【safety】', state.current_special.name, '中断', '8秒以上継続')
         state.current_special.name = nil
@@ -2019,14 +2056,12 @@ windower.register_event('prerender', function()
         state.suspend_buffs = false
         state.buff_resume_time = 0
 
-        state.casting = false
-        state.cast_fail_time = nil
-
         if state.retry.active and state.retry.kind == 'special' then
             reset_retry()
         end
     end
 
+    -- スペシャル魔法予約実行
     if state.queued_special.name and not state.current_special.name then
         local ok, reason = can_start_special()
         if ok then
@@ -2096,25 +2131,14 @@ windower.register_event('prerender', function()
         state.buffset.next_time = 0
     end
 
-    if state.casting and state.cast_fail_time and t > state.cast_fail_time then
-        state.casting = false
-        state.cast_fail_time = nil
-        if state.retry.active and state.retry.pending then
-            state.retry.pending = false
-            if state.retry.is_utsu then
-                state.retry.next_time = t + 0.5
-            else
-                state.retry.next_time = t
-            end
-        end
-    end
-
     if ws_judge and ws_judge.state and ws_judge.check_timeout then ws_judge.check_timeout() end
     if magic_judge and magic_judge.state and magic_judge.check_timeout then magic_judge.check_timeout() end
 
+    -- ⑥a: スペシャル魔法のリトライ処理
     if state.retry.active then
-        if state.current_special.name and state.casting then return end
-        if state.casting then return end
+        -- 詠唱中は待機
+        if state.current_special.name and (magic_judge and magic_judge.state and magic_judge.state.active) then return end
+        if (magic_judge and magic_judge.state and magic_judge.state.active) then return end
         if t < state.retry.next_time then return end
 
         local r = nil
@@ -2135,8 +2159,6 @@ windower.register_event('prerender', function()
                 state.current_special.priority = nil
                 state.current_special.start_time = nil
                 state.suspend_buffs = false
-                state.casting = false
-                state.cast_fail_time = nil
                 reset_retry()
                 return
             end
@@ -2155,11 +2177,7 @@ windower.register_event('prerender', function()
             return
         end
 
-        if not can_act() then
-            state.retry.next_time = t + 0.2
-            return
-        end
-
+        -- ⑤: can_start_special を確認
         local ok, reason = can_start_special()
         if not ok then
             state.retry.next_time = t + 0.25
@@ -2170,10 +2188,12 @@ windower.register_event('prerender', function()
             { name = state.retry.spell_name, recast_id = state.retry.spell_id },
             state.retry.target,
             {
-                is_mb     = false,
-                kind      = state.retry.kind or 'retry',
-                source    = 'retry',
-                max_count = state.retry.max_count or 2,
+                is_mb      = false,
+                kind       = state.retry.kind or 'retry',
+                source     = 'retry',
+                source_set = state.retry.kind or 'retry',
+                max_count  = state.retry.max_count or 2,
+                priority   = state.retry.priority or 999,
             }
         )
 
@@ -2197,6 +2217,7 @@ windower.register_event('prerender', function()
         end
     end
 
+    -- スペシャル魔法の成否確認
     if state.current_special.name then
         local r = nil
         if magic_judge and magic_judge.consume_result_for then
@@ -2208,8 +2229,6 @@ windower.register_event('prerender', function()
             state.current_special.start_time = nil
 
             state.suspend_buffs = false
-            state.casting = false
-            state.cast_fail_time = nil
 
             reset_retry()
             return
@@ -2227,8 +2246,6 @@ windower.register_event('prerender', function()
             state.current_special.start_time = nil
 
             state.suspend_buffs = false
-            state.casting = false
-            state.cast_fail_time = nil
 
             reset_retry()
             return
@@ -2286,6 +2303,10 @@ windower.register_event('job change', update_external_tools)
 ------------------------------------------------------------
 -- 全フラグ完全リセット関数
 ------------------------------------------------------------
+------------------------------------------------------------
+-- 全フラグ完全リセット関数
+-- ⑦: 安全装置処理
+------------------------------------------------------------
 function reset_all_states()
     ws_set_off(true)
 
@@ -2318,30 +2339,45 @@ function reset_all_states()
     state.sleep2_name = nil
     state.sleep2_recast_id = nil
 
-    state.casting = false
-    state.cast_fail_time = nil
+    -- ②: casting flags を廃止
     state.last_spell = nil
     state.last_target_id = nil
 
     state.suspend_buffs = false
     state.buff_resume_time = 0
-    state.combatbuff.casting = false
-    state.combatbuff.start_time = nil
     state.combatbuff.last_finish_time = 0
-    state.combatbuff.suspend_until = nil
 
     state.combatbuff.pending = false
     state.combatbuff.pending_spell = nil
     state.combatbuff.pending_target = nil
+    state.combatbuff.pending_priority = nil
 
     state.buffset_last_finish_time = 0
 
     state.first_hit_done = false
 
+    -- magic_judge も明示的にリセット
+    if magic_judge and magic_judge.state then
+        magic_judge.state.active = false
+        magic_judge.state.last_result = nil
+        magic_judge.state.last_result_src = nil
+    end
+
     reset_mbset()
     reset_ws_chain()  -- Also reset WS chain tracking on full reset
 
     log('完全リセット')
+end
+
+------------------------------------------------------------
+-- magic_judge 詠唱不可後コールバック設定 (③)
+------------------------------------------------------------
+if magic_judge and magic_judge.state then
+    magic_judge.state.on_cast_fail_callback = function(spell_name, source_set, reason)
+        -- ③: 詠唱不可後ディレイを設定し、can_start_special に含める
+        state.special_delay_until = now() + DELAY_CONFIG.cast_fail
+        log_msg('abort', string.format('【%s】', source_set or 'unknown'), spell_name or '', '詠唱不可', reason or '')
+    end
 end
 
 ------------------------------------------------------------
