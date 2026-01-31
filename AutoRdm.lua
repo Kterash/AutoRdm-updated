@@ -202,9 +202,9 @@ local state = {
 
         last_process_time = 0,
         
-        -- 新規: can_start_special() 待機状態
-        waiting_for_start = false,
-        wait_start_time = nil,
+        -- 新規: 再実行スケジュール
+        retry_scheduled = false,
+        retry_time = 0,
     },
 
     buffset = {
@@ -215,9 +215,9 @@ local state = {
         next_step_on_finish = 0,
         step_start_time     = 0,
         
-        -- 新規: can_start_special() 待機状態
-        waiting_for_start = false,
-        wait_start_time = nil,
+        -- 新規: 再実行スケジュール
+        retry_scheduled = false,
+        retry_time = 0,
     },
 
     current_special = {
@@ -247,9 +247,9 @@ local state = {
         last_finish_time = 0,
         suspend_until    = 0,
         
-        -- 新規: can_start_special() 待機状態
-        waiting_for_start = false,
-        wait_start_time = nil,
+        -- 新規: 再実行スケジュール時刻
+        retry_scheduled = false,
+        retry_time = 0,
     },
 
     buffset_last_finish_time = 0,
@@ -309,9 +309,9 @@ state.mbset = {
     last_props = nil,
     -- 新規: MB1 -> MB2 を待っているフラグ（タイムアウト挙動分岐用）
     awaiting_mb2 = false,
-    -- 新規: can_start_special() 待機状態
-    waiting_for_start = false,
-    wait_start_time = nil,
+    -- 新規: 再実行スケジュール
+    retry_scheduled = false,
+    retry_time = 0,
 }
 
 ------------------------------------------------------------
@@ -401,50 +401,57 @@ local function can_start_special(priority_level)
 end
 
 ------------------------------------------------------------
--- wait_can_start_special: can_start_special() が OK になるまで待機する
+-- calculate_can_start_delay: can_start_special() がOKになるまでの待機時間を計算
 -- 引数:
 --   priority_level: 優先度レベル (PRIORITY_LEVELS の値)
---   wait_state: 待機状態を記録する state (例: state.mbset, state.buffset)
---   timeout: タイムアウト時間（秒）、デフォルトは DELAYS.CAN_START_RETRY_TIMEOUT
 -- 戻り値:
---   "ok": can_start_special() が OK になった
---   "waiting": まだ待機中
---   "timeout": タイムアウトした
---   "interrupted": より高い優先度に割り込まれた
+--   delay: can_start_special() がOKになるまでの秒数 (0 = 即座にOK)
+--   reason: ブロックされている理由 (nil = ブロックなし)
+--   can_schedule: 再実行スケジュール可能か (false = 優先度による永続的ブロック等)
 ------------------------------------------------------------
-local function wait_can_start_special(priority_level, wait_state, timeout)
-    timeout = timeout or DELAYS.CAN_START_RETRY_TIMEOUT
+local function calculate_can_start_delay(priority_level)
     local t = now()
+    local max_delay = 0
+    local block_reason = nil
     
-    -- 待機開始
-    if not wait_state.waiting_for_start then
-        wait_state.waiting_for_start = true
-        wait_state.wait_start_time = t
+    -- WS モーション中チェック
+    if state.ws_motion then
+        -- WS モーション中は予測不可能なので、少し待つ
+        max_delay = math.max(max_delay, 0.5)
+        block_reason = "WSモーション中"
     end
     
-    -- タイムアウトチェック
-    if t - wait_state.wait_start_time > timeout then
-        wait_state.waiting_for_start = false
-        wait_state.wait_start_time = nil
-        return "timeout"
+    -- WS 完了後ディレイチェック
+    if t < state.ws_delay_until then
+        local delay = state.ws_delay_until - t
+        max_delay = math.max(max_delay, delay)
+        block_reason = "WS完了後ディレイ中"
     end
     
-    -- 割り込みチェック: より高い優先度が実行中なら中断
-    if state.current_priority_level and state.current_priority_level < priority_level then
-        wait_state.waiting_for_start = false
-        wait_state.wait_start_time = nil
-        return "interrupted"
+    -- 魔法判定中チェック
+    if magic_judge and magic_judge.state and magic_judge.state.active then
+        -- 魔法判定中は予測困難なので、短い待機時間を設定
+        max_delay = math.max(max_delay, 0.5)
+        block_reason = "魔法判定中"
     end
     
-    -- can_start_special() チェック
-    local ok, reason = can_start_special(priority_level)
-    if ok then
-        wait_state.waiting_for_start = false
-        wait_state.wait_start_time = nil
-        return "ok"
+    -- スペシャルディレイチェック
+    if t < state.special_delay_until then
+        local delay = state.special_delay_until - t
+        max_delay = math.max(max_delay, delay)
+        block_reason = "ディレイ中"
     end
     
-    return "waiting"
+    -- 優先度チェック: より高い優先度のものが実行中
+    if priority_level and state.current_priority_level then
+        if state.current_priority_level < priority_level then
+            -- 優先度による永続的ブロック（スケジュール不可）
+            return 0, "より高い優先度の処理が実行中", false
+        end
+    end
+    
+    -- ブロックがない、または計算された待機時間を返す
+    return max_delay, block_reason, true
 end
 
 local function can_act()
@@ -744,8 +751,8 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
     -- SP 実行時は WS/BUFFSET だけでなく MB も中断（完全終了）して再開しない
     if state.ws.active then
         log_msg('abort', '【WS】', 'WSセット', '中断', 'SP発動のため停止')
-        state.ws.waiting_for_start = false
-        state.ws.wait_start_time = nil
+        state.ws.retry_scheduled = false
+        state.ws.retry_time = 0
         ws_set_off()
     end
     if state.buffset.active then
@@ -755,14 +762,14 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
         state.buffset.waiting_for_finish = false
         state.buffset.next_step_on_finish = 0
         state.buffset.next_time = 0
-        state.buffset.waiting_for_start = false
-        state.buffset.wait_start_time = nil
+        state.buffset.retry_scheduled = false
+        state.buffset.retry_time = 0
     end
 
     -- ここで MB が進行中なら完全終了（再開しない）
     if state.mbset and (state.mbset.active or state.mbset.mb1_spell or state.mbset.mb2_spell) then
-        state.mbset.waiting_for_start = false
-        state.mbset.wait_start_time = nil
+        state.mbset.retry_scheduled = false
+        state.mbset.retry_time = 0
         reset_mbset('SP発動により中断')
     end
 
@@ -863,18 +870,50 @@ local function process_buffs()
         return
     end
 
-    -- 自動戦闘バフ用の優先度で can_start_special() を待つ
-    -- ただし、自動戦闘バフは待機状態でもログを出さず、静かに待つ
-    local wait_result = wait_can_start_special(PRIORITY_LEVELS.AUTOBUFF, state.combatbuff)
+    -- 自動戦闘バフ用の優先度で can_start_special() をチェック
+    local ok, reason = can_start_special(PRIORITY_LEVELS.AUTOBUFF)
     
-    if wait_result == "waiting" then
-        -- まだ待機中（静かに待つ）
-        return
-    elseif wait_result == "timeout" or wait_result == "interrupted" then
-        -- タイムアウトまたは割り込み（自動戦闘バフなのでログは出さない）
-        return
+    if not ok then
+        -- ブロックされている場合
+        if not state.combatbuff.retry_scheduled then
+            -- まだスケジュールされていない場合、再実行時刻を計算
+            local delay, block_reason, can_schedule = calculate_can_start_delay(PRIORITY_LEVELS.AUTOBUFF)
+            
+            if can_schedule and delay > 0 and delay <= DELAYS.CAN_START_RETRY_TIMEOUT then
+                -- スケジュール可能な場合、1回のみ再実行を予約
+                state.combatbuff.retry_scheduled = true
+                state.combatbuff.retry_time = now() + delay
+            else
+                -- スケジュール不可（優先度ブロック等）またはタイムアウト超過
+                state.combatbuff.retry_scheduled = false
+                state.combatbuff.retry_time = 0
+            end
+        elseif now() < state.combatbuff.retry_time then
+            -- スケジュール済みだがまだ時刻に達していない
+            return
+        else
+            -- スケジュール時刻に達したので、再度チェック（1回のみ）
+            state.combatbuff.retry_scheduled = false
+            state.combatbuff.retry_time = 0
+            
+            -- 再チェック
+            local ok2, reason2 = can_start_special(PRIORITY_LEVELS.AUTOBUFF)
+            if not ok2 then
+                -- まだブロックされている場合は諦める（1回のみのリトライ）
+                return
+            end
+            -- ok2 == true なら続行
+        end
+        
+        if not ok and not state.combatbuff.retry_scheduled then
+            -- スケジュール不可なので諦める
+            return
+        end
+    else
+        -- can_start_special() が OK の場合、スケジュールをクリア
+        state.combatbuff.retry_scheduled = false
+        state.combatbuff.retry_time = 0
     end
-    -- wait_result == "ok" の場合は続行
 
     local recasts = windower.ffxi.get_spell_recasts()
     if not recasts then return end
@@ -975,31 +1014,64 @@ local function buffset_cast_next(list)
     end
 
     if step == 1 and entry.name == "ヘイス��II" then
-        -- 強化セット用の優先度で can_start_special() を待つ
-        local wait_result = wait_can_start_special(PRIORITY_LEVELS.BUFFSET, state.buffset)
+        -- 強化セット用の優先度で can_start_special() をチェック
+        local ok, reason = can_start_special(PRIORITY_LEVELS.BUFFSET)
         
-        if wait_result == "waiting" then
-            -- まだ待機中
-            state.buffset.next_time = now() + 0.1
-            return
-        elseif wait_result == "timeout" then
-            log_msg('abort', '【buff】', '強化セット', '中断', 'can_start_special待機タイムアウト（5秒）')
-            state.buffset.active = false
-            state.buffset.step = 0
-            state.buffset.waiting_for_finish = false
-            state.buffset.next_step_on_finish = 0
-            state.buffset.next_time = 0
-            return
-        elseif wait_result == "interrupted" then
-            log_msg('abort', '【buff】', '強化セット', '中断', '上位優先度により割り込み')
-            state.buffset.active = false
-            state.buffset.step = 0
-            state.buffset.waiting_for_finish = false
-            state.buffset.next_step_on_finish = 0
-            state.buffset.next_time = 0
-            return
+        if not ok then
+            -- ブロックされている場合
+            if not state.buffset.retry_scheduled then
+                -- まだスケジュールされていない場合、再実行時刻を計算
+                local delay, block_reason, can_schedule = calculate_can_start_delay(PRIORITY_LEVELS.BUFFSET)
+                
+                if can_schedule and delay > 0 and delay <= DELAYS.CAN_START_RETRY_TIMEOUT then
+                    -- スケジュール可能な場合、1回のみ再実行を予約
+                    state.buffset.retry_scheduled = true
+                    state.buffset.retry_time = now() + delay
+                    state.buffset.next_time = state.buffset.retry_time
+                    return
+                else
+                    -- スケジュール不可（優先度ブロック等）またはタイムアウト超過
+                    if not can_schedule then
+                        log_msg('abort', '【buff】', '強化セット', '中断', '上位優先度により割り込み')
+                    else
+                        log_msg('abort', '【buff】', '強化セット', '中断', 'can_start_special待機タイムアウト（5秒超）')
+                    end
+                    state.buffset.active = false
+                    state.buffset.step = 0
+                    state.buffset.waiting_for_finish = false
+                    state.buffset.next_step_on_finish = 0
+                    state.buffset.next_time = 0
+                    state.buffset.retry_scheduled = false
+                    state.buffset.retry_time = 0
+                    return
+                end
+            elseif now() < state.buffset.retry_time then
+                -- スケジュール済みだがまだ時刻に達していない
+                return
+            else
+                -- スケジュール時刻に達したので、再度チェック（1回のみ）
+                state.buffset.retry_scheduled = false
+                state.buffset.retry_time = 0
+                
+                -- 再チェック
+                local ok2, reason2 = can_start_special(PRIORITY_LEVELS.BUFFSET)
+                if not ok2 then
+                    -- まだブロックされている場合は諦める（1回のみのリトライ）
+                    log_msg('abort', '【buff】', '強化セット', '中断', 'リトライ後もブロック継続')
+                    state.buffset.active = false
+                    state.buffset.step = 0
+                    state.buffset.waiting_for_finish = false
+                    state.buffset.next_step_on_finish = 0
+                    state.buffset.next_time = 0
+                    return
+                end
+                -- ok2 == true なら続行
+            end
+        else
+            -- can_start_special() が OK の場合、スケジュールをクリア
+            state.buffset.retry_scheduled = false
+            state.buffset.retry_time = 0
         end
-        -- wait_result == "ok" の場合は続行
     end
 
     if not can_act() then
@@ -1218,36 +1290,73 @@ local function process_ws()
     local w = state.ws
 
     if w.queued_mode and not w.active then
-        -- WS セット用の優先度で can_start_special() を待つ
-        local wait_result = wait_can_start_special(PRIORITY_LEVELS.WS_SET, state.ws)
+        -- WS セット用の優先度で can_start_special() をチェック
+        local ok, reason = can_start_special(PRIORITY_LEVELS.WS_SET)
         
-        if wait_result == "ok" then
-            reset_ws_for_new_set(w.queued_mode)
-            log_msg('start', '【WS】', w.queued_mode, 'WSセット', '開始')
-            w.logged_reservation = false
-            w.queued_mode = nil
-            
-            -- WS セット実行中の優先度レベルを設定
-            state.current_priority_level = PRIORITY_LEVELS.WS_SET
-            state.current_priority_start_time = now()
-            return
-        elseif wait_result == "waiting" then
-            if not w.logged_reservation then
-                log_msg('notice', '【WS】', w.queued_mode, 'WS1予約')
-                w.logged_reservation = true
+        if not ok then
+            -- ブロックされている場合
+            if not w.retry_scheduled then
+                -- まだスケジュールされていない場合、再実行時刻を計算
+                local delay, block_reason, can_schedule = calculate_can_start_delay(PRIORITY_LEVELS.WS_SET)
+                
+                if can_schedule and delay > 0 and delay <= DELAYS.CAN_START_RETRY_TIMEOUT then
+                    -- スケジュール可能な場合、1回のみ再実行を予約
+                    w.retry_scheduled = true
+                    w.retry_time = now() + delay
+                    
+                    if not w.logged_reservation then
+                        log_msg('notice', '【WS】', w.queued_mode, 'WS1予約')
+                        w.logged_reservation = true
+                    end
+                    return
+                else
+                    -- スケジュール不可（優先度ブロック等）またはタイムアウト超過
+                    if not can_schedule then
+                        log_msg('abort', '【WS】', 'WSセット', '中断', '上位優先度により割り込み')
+                    else
+                        log_msg('abort', '【WS】', 'WSセット', '中断', 'can_start_special待機タイムアウト（5秒超）')
+                    end
+                    w.queued_mode = nil
+                    w.logged_reservation = false
+                    w.retry_scheduled = false
+                    w.retry_time = 0
+                    return
+                end
+            elseif now() < w.retry_time then
+                -- スケジュール済みだがまだ時刻に達していない
+                return
+            else
+                -- スケジュール時刻に達したので、再度チェック（1回のみ）
+                w.retry_scheduled = false
+                w.retry_time = 0
+                
+                -- 再チェック
+                local ok2, reason2 = can_start_special(PRIORITY_LEVELS.WS_SET)
+                if not ok2 then
+                    -- まだブロックされている場合は諦める（1回のみのリトライ）
+                    log_msg('abort', '【WS】', 'WSセット', '中断', 'リトライ後もブロック継続')
+                    w.queued_mode = nil
+                    w.logged_reservation = false
+                    return
+                end
+                -- ok2 == true なら続行
             end
-            return
-        elseif wait_result == "timeout" then
-            log_msg('abort', '【WS】', 'WSセット', '中断', 'can_start_special待機タイムアウト（5秒）')
-            w.queued_mode = nil
-            w.logged_reservation = false
-            return
-        elseif wait_result == "interrupted" then
-            log_msg('abort', '【WS】', 'WSセット', '中断', '上位優先度により割り込み')
-            w.queued_mode = nil
-            w.logged_reservation = false
-            return
+        else
+            -- can_start_special() が OK の場合、スケジュールをクリア
+            w.retry_scheduled = false
+            w.retry_time = 0
         end
+        
+        -- ここまで来たら can_start_special() が OK
+        reset_ws_for_new_set(w.queued_mode)
+        log_msg('start', '【WS】', w.queued_mode, 'WSセット', '開始')
+        w.logged_reservation = false
+        w.queued_mode = nil
+        
+        -- WS セット実行中の優先度レベルを設定
+        state.current_priority_level = PRIORITY_LEVELS.WS_SET
+        state.current_priority_start_time = now()
+        return
     end
 
     if not w.active then return end
@@ -1464,26 +1573,59 @@ local function try_start_mb1(spell_name, target, opts)
     end
 
     if not force_bypass then
-        -- MB セットの優先度で can_start_special() を待つ
-        local wait_result = wait_can_start_special(PRIORITY_LEVELS.MB_SET, state.mbset)
+        -- MB セットの優先度で can_start_special() をチェック
+        local ok, reason = can_start_special(PRIORITY_LEVELS.MB_SET)
         
-        if wait_result == "waiting" then
-            -- まだ待機中
-            return false
-        elseif wait_result == "timeout" then
-            log_msg('abort', '【MB】', 'MB1', '中断', 'can_start_special待機タイムアウト（5秒）')
-            return false
-        elseif wait_result == "interrupted" then
-            log_msg('abort', '【MB】', 'MB1', '中断', '上位優先度により割り込み')
-            return false
+        if not ok then
+            -- ブロックされている場合
+            if not state.mbset.retry_scheduled then
+                -- まだスケジュールされていない場合、再実行時刻を計算
+                local delay, block_reason, can_schedule = calculate_can_start_delay(PRIORITY_LEVELS.MB_SET)
+                
+                if can_schedule and delay > 0 and delay <= DELAYS.CAN_START_RETRY_TIMEOUT then
+                    -- スケジュール可能な場合、1回のみ再実行を予約
+                    state.mbset.retry_scheduled = true
+                    state.mbset.retry_time = now() + delay
+                    return false
+                else
+                    -- スケジュール不可（優先度ブロック等）またはタイムアウト超過
+                    if not can_schedule then
+                        log_msg('abort', '【MB】', 'MB1', '中断', '上位優先度により割り込み')
+                    else
+                        log_msg('abort', '【MB】', 'MB1', '中断', 'can_start_special待機タイムアウト（5秒超）')
+                    end
+                    state.mbset.retry_scheduled = false
+                    state.mbset.retry_time = 0
+                    return false
+                end
+            elseif now() < state.mbset.retry_time then
+                -- スケジュール済みだがまだ時刻に達していない
+                return false
+            else
+                -- スケジュール時刻に達したので、再度チェック（1回のみ）
+                state.mbset.retry_scheduled = false
+                state.mbset.retry_time = 0
+                
+                -- 再チェック
+                local ok2, reason2 = can_start_special(PRIORITY_LEVELS.MB_SET)
+                if not ok2 then
+                    -- まだブロックされている場合は諦める（1回のみのリトライ）
+                    log_msg('abort', '【MB】', 'MB1', '中断', 'リトライ後もブロック継続')
+                    return false
+                end
+                -- ok2 == true なら続行
+            end
+        else
+            -- can_start_special() が OK の場合、スケジュールをクリア
+            state.mbset.retry_scheduled = false
+            state.mbset.retry_time = 0
         end
-        -- wait_result == "ok" の場合は続行
     end
 
     if state.ws.active then
         --log_msg('report', '【WS】', 'WSセット', '中断', 'MBセット発動')
-        state.ws.waiting_for_start = false
-        state.ws.wait_start_time = nil
+        state.ws.retry_scheduled = false
+        state.ws.retry_time = 0
         ws_set_off()
     end
     if state.buffset.active then
@@ -1493,8 +1635,8 @@ local function try_start_mb1(spell_name, target, opts)
         state.buffset.waiting_for_finish = false
         state.buffset.next_step_on_finish = 0
         state.buffset.next_time = 0
-        state.buffset.waiting_for_start = false
-        state.buffset.wait_start_time = nil
+        state.buffset.retry_scheduled = false
+        state.buffset.retry_time = 0
     end
     state.suspend_buffs = true
 
@@ -1541,20 +1683,53 @@ local function try_start_mb2(spell_name, target)
         return false
     end
 
-    -- MB2 も can_start_special() を待つ
-    local wait_result = wait_can_start_special(PRIORITY_LEVELS.MB_SET, state.mbset)
+    -- MB2 も can_start_special() をチェック
+    local ok, reason = can_start_special(PRIORITY_LEVELS.MB_SET)
     
-    if wait_result == "waiting" then
-        -- まだ待機中
-        return false
-    elseif wait_result == "timeout" then
-        log_msg('abort', '【MB】', 'MB2', '中断', 'can_start_special待機タイムアウト（5秒）')
-        return false
-    elseif wait_result == "interrupted" then
-        log_msg('abort', '【MB】', 'MB2', '中断', '上位優先度により割り込み')
-        return false
+    if not ok then
+        -- ブロックされている場合
+        if not state.mbset.retry_scheduled then
+            -- まだスケジュールされていない場合、再実行時刻を計算
+            local delay, block_reason, can_schedule = calculate_can_start_delay(PRIORITY_LEVELS.MB_SET)
+            
+            if can_schedule and delay > 0 and delay <= DELAYS.CAN_START_RETRY_TIMEOUT then
+                -- スケジュール可能な場合、1回のみ再実行を予約
+                state.mbset.retry_scheduled = true
+                state.mbset.retry_time = now() + delay
+                return false
+            else
+                -- スケジュール不可（優先度ブロック等）またはタイムアウト超過
+                if not can_schedule then
+                    log_msg('abort', '【MB】', 'MB2', '中断', '上位優先度により割り込み')
+                else
+                    log_msg('abort', '【MB】', 'MB2', '中断', 'can_start_special待機タイムアウト（5秒超）')
+                end
+                state.mbset.retry_scheduled = false
+                state.mbset.retry_time = 0
+                return false
+            end
+        elseif now() < state.mbset.retry_time then
+            -- スケジュール済みだがまだ時刻に達していない
+            return false
+        else
+            -- スケジュール時刻に達したので、再度チェック（1回のみ）
+            state.mbset.retry_scheduled = false
+            state.mbset.retry_time = 0
+            
+            -- 再チェック
+            local ok2, reason2 = can_start_special(PRIORITY_LEVELS.MB_SET)
+            if not ok2 then
+                -- まだブロックされている場合は諦める（1回のみのリトライ）
+                log_msg('abort', '【MB】', 'MB2', '中断', 'リトライ後もブロック継続')
+                return false
+            end
+            -- ok2 == true なら続行
+        end
+    else
+        -- can_start_special() が OK の場合、スケジュールをクリア
+        state.mbset.retry_scheduled = false
+        state.mbset.retry_time = 0
     end
-    -- wait_result == "ok" の場合は続行
 
     state.last_spell = spell_name
 
@@ -2074,14 +2249,14 @@ local function emit_combat_end(reason)
     reset_ws_chain()        -- Reset WS chain tracking on combat end
     
     -- 各種待機状態をクリア
-    state.ws.waiting_for_start = false
-    state.ws.wait_start_time = nil
-    state.mbset.waiting_for_start = false
-    state.mbset.wait_start_time = nil
-    state.buffset.waiting_for_start = false
-    state.buffset.wait_start_time = nil
-    state.combatbuff.waiting_for_start = false
-    state.combatbuff.wait_start_time = nil
+    state.ws.retry_scheduled = false
+    state.ws.retry_time = 0
+    state.mbset.retry_scheduled = false
+    state.mbset.retry_time = 0
+    state.buffset.retry_scheduled = false
+    state.buffset.retry_time = 0
+    state.combatbuff.retry_scheduled = false
+    state.combatbuff.retry_time = 0
     
     -- 優先度レベルをクリア
     state.current_priority_level = nil
@@ -2160,16 +2335,16 @@ windower.register_event('prerender', function()
         state.buffset.waiting_for_finish = false
         state.buffset.next_step_on_finish = 0
         state.buffset.next_time = 0
-        state.buffset.waiting_for_start = false
-        state.buffset.wait_start_time = nil
+        state.buffset.retry_scheduled = false
+        state.buffset.retry_time = 0
         
         -- 各種待機状態をクリア
-        state.ws.waiting_for_start = false
-        state.ws.wait_start_time = nil
-        state.mbset.waiting_for_start = false
-        state.mbset.wait_start_time = nil
-        state.combatbuff.waiting_for_start = false
-        state.combatbuff.wait_start_time = nil
+        state.ws.retry_scheduled = false
+        state.ws.retry_time = 0
+        state.mbset.retry_scheduled = false
+        state.mbset.retry_time = 0
+        state.combatbuff.retry_scheduled = false
+        state.combatbuff.retry_time = 0
         
         -- 優先度レベルをクリア
         state.current_priority_level = nil
@@ -2292,8 +2467,8 @@ windower.register_event('prerender', function()
         state.buffset.waiting_for_finish = false
         state.buffset.next_step_on_finish = 0
         state.buffset.next_time = 0
-        state.buffset.waiting_for_start = false
-        state.buffset.wait_start_time = nil
+        state.buffset.retry_scheduled = false
+        state.buffset.retry_time = 0
         
         -- 優先度レベルをクリア（BUFFSET の場合）
         if state.current_priority_level == PRIORITY_LEVELS.BUFFSET then
@@ -2495,8 +2670,8 @@ function reset_all_states()
     state.buffset.next_step_on_finish = 0
     state.buffset.next_time = 0
     state.buffset.step_start_time = 0
-    state.buffset.waiting_for_start = false
-    state.buffset.wait_start_time = nil
+    state.buffset.retry_scheduled = false
+    state.buffset.retry_time = 0
 
     reset_retry()
 
@@ -2527,18 +2702,18 @@ function reset_all_states()
     state.buff_resume_time = 0
     state.combatbuff.last_finish_time = 0
     state.combatbuff.suspend_until = nil
-    state.combatbuff.waiting_for_start = false
-    state.combatbuff.wait_start_time = nil
+    state.combatbuff.retry_scheduled = false
+    state.combatbuff.retry_time = 0
 
     state.buffset_last_finish_time = 0
 
     state.first_hit_done = false
     
     -- 各種待機状態をクリア
-    state.ws.waiting_for_start = false
-    state.ws.wait_start_time = nil
-    state.mbset.waiting_for_start = false
-    state.mbset.wait_start_time = nil
+    state.ws.retry_scheduled = false
+    state.ws.retry_time = 0
+    state.mbset.retry_scheduled = false
+    state.mbset.retry_time = 0
     
     -- 優先度レベルをクリア
     state.current_priority_level = nil
