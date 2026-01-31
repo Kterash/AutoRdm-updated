@@ -201,6 +201,10 @@ local state = {
         retry_wait_logged = false,
 
         last_process_time = 0,
+        
+        -- 新規: can_start_special() 待機状態
+        waiting_for_start = false,
+        wait_start_time = nil,
     },
 
     buffset = {
@@ -210,6 +214,10 @@ local state = {
         waiting_for_finish  = false,
         next_step_on_finish = 0,
         step_start_time     = 0,
+        
+        -- 新規: can_start_special() 待機状態
+        waiting_for_start = false,
+        wait_start_time = nil,
     },
 
     current_special = {
@@ -238,6 +246,10 @@ local state = {
     combatbuff = {
         last_finish_time = 0,
         suspend_until    = 0,
+        
+        -- 新規: can_start_special() 待機状態
+        waiting_for_start = false,
+        wait_start_time = nil,
     },
 
     buffset_last_finish_time = 0,
@@ -276,6 +288,10 @@ local state = {
     last_player_status = nil,
     -- 新規: 戦闘終了ログ抑止のための一時フラグ（タイムスタンプ）
     combat_end_suppressed_until = 0,
+    
+    -- 新規: 優先度管理用（全魔法タイプの現在実行中の優先度レベル）
+    current_priority_level = nil,  -- 現在実行中の優先度レベル (PRIORITY_LEVELS の値)
+    current_priority_start_time = nil,  -- can_start_special() 待機開始時刻
 }
 
 state.mbset = {
@@ -293,6 +309,9 @@ state.mbset = {
     last_props = nil,
     -- 新規: MB1 -> MB2 を待っているフラグ（タイムアウト挙動分岐用）
     awaiting_mb2 = false,
+    -- 新規: can_start_special() 待機状態
+    waiting_for_start = false,
+    wait_start_time = nil,
 }
 
 ------------------------------------------------------------
@@ -305,6 +324,17 @@ local SPECIAL_PRIORITY = {
     ["サイレス"]   = 4,
     ["ディスペル"] = 5,
     ["ケアルIV"]   = 999,
+}
+
+------------------------------------------------------------
+-- 優先度レベル定義（数値が小さいほど優先度が高い）
+------------------------------------------------------------
+local PRIORITY_LEVELS = {
+    SPECIAL = 1,      -- スペシャル魔法
+    MB_SET = 2,       -- MBセット
+    WS_SET = 3,       -- WSセット
+    BUFFSET = 4,      -- 強化セット
+    AUTOBUFF = 5,     -- 自動戦闘バフ
 }
 
 ------------------------------------------------------------
@@ -334,12 +364,19 @@ local DELAYS = {
     -- 安全タイムアウト
     SAFETY_TIMEOUT_SPECIAL = 5.0,
     SAFETY_TIMEOUT_OTHER = 5.0,
+    
+    -- can_start_special() 待機最大時間
+    CAN_START_RETRY_TIMEOUT = 5.0,
+    CAN_START_RETRY_INTERVAL = 0.1,
 }
 
 ------------------------------------------------------------
 -- can_start_special（スペシャル実行ロック判定）
+-- priority_level: 呼び出し側の優先度レベル (PRIORITY_LEVELS の値)
+--   - 指定された場合、より高い優先度のものが実行中なら false を返す
+--   - nil の場合は従来通りの動作（既存コードとの互換性を保つ）
 ------------------------------------------------------------
-local function can_start_special()
+local function can_start_special(priority_level)
     if state.ws_motion then
         return false, "WSモーション中"
     end
@@ -352,7 +389,62 @@ local function can_start_special()
     if now() < state.special_delay_until then
         return false, "ディレイ中"
     end
+    
+    -- 優先度チェック: より高い優先度のものが実行中なら待つ
+    if priority_level and state.current_priority_level then
+        if state.current_priority_level < priority_level then
+            return false, "より高い優先度の処理が実行中"
+        end
+    end
+    
     return true, nil
+end
+
+------------------------------------------------------------
+-- wait_can_start_special: can_start_special() が OK になるまで待機する
+-- 引数:
+--   priority_level: 優先度レベル (PRIORITY_LEVELS の値)
+--   wait_state: 待機状態を記録する state (例: state.mbset, state.buffset)
+--   timeout: タイムアウト時間（秒）、デフォルトは DELAYS.CAN_START_RETRY_TIMEOUT
+-- 戻り値:
+--   "ok": can_start_special() が OK になった
+--   "waiting": まだ待機中
+--   "timeout": タイムアウトした
+--   "interrupted": より高い優先度に割り込まれた
+------------------------------------------------------------
+local function wait_can_start_special(priority_level, wait_state, timeout)
+    timeout = timeout or DELAYS.CAN_START_RETRY_TIMEOUT
+    local t = now()
+    
+    -- 待機開始
+    if not wait_state.waiting_for_start then
+        wait_state.waiting_for_start = true
+        wait_state.wait_start_time = t
+    end
+    
+    -- タイムアウトチェック
+    if t - wait_state.wait_start_time > timeout then
+        wait_state.waiting_for_start = false
+        wait_state.wait_start_time = nil
+        return "timeout"
+    end
+    
+    -- 割り込みチェック: より高い優先度が実行中なら中断
+    if state.current_priority_level and state.current_priority_level < priority_level then
+        wait_state.waiting_for_start = false
+        wait_state.wait_start_time = nil
+        return "interrupted"
+    end
+    
+    -- can_start_special() チェック
+    local ok, reason = can_start_special(priority_level)
+    if ok then
+        wait_state.waiting_for_start = false
+        wait_state.wait_start_time = nil
+        return "ok"
+    end
+    
+    return "waiting"
 end
 
 local function can_act()
@@ -539,6 +631,11 @@ local function cast_spell(spell, target, opts)
                 state.buffset.next_time           = now() + 0.5
                 state.buffset_last_finish_time    = now()
             end
+            -- 優先度レベルをクリア（BUFFSET の場合）
+            if source_set == 'buffset' and state.current_priority_level == PRIORITY_LEVELS.BUFFSET then
+                state.current_priority_level = nil
+                state.current_priority_start_time = nil
+            end
         end
 
         magic_judge.start(spell.name, 'buffset', callback)
@@ -579,6 +676,12 @@ local function cast_spell_combatbuff(spell, target)
             state.special_delay_until = now() + DELAYS.AFTER_AUTOBUFF_FAIL
         end
         state.combatbuff.last_finish_time = now()
+        
+        -- 優先度レベルをクリア（AUTOBUFF の場合）
+        if source_set == 'autobuff' and state.current_priority_level == PRIORITY_LEVELS.AUTOBUFF then
+            state.current_priority_level = nil
+            state.current_priority_start_time = nil
+        end
     end
 
     magic_judge.start(spell.name, 'autobuff', callback)
@@ -641,6 +744,8 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
     -- SP 実行時は WS/BUFFSET だけでなく MB も中断（完全終了）して再開しない
     if state.ws.active then
         log_msg('abort', '【WS】', 'WSセット', '中断', 'SP発動のため停止')
+        state.ws.waiting_for_start = false
+        state.ws.wait_start_time = nil
         ws_set_off()
     end
     if state.buffset.active then
@@ -650,10 +755,14 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
         state.buffset.waiting_for_finish = false
         state.buffset.next_step_on_finish = 0
         state.buffset.next_time = 0
+        state.buffset.waiting_for_start = false
+        state.buffset.wait_start_time = nil
     end
 
     -- ここで MB が進行中なら完全終了（再開しない）
     if state.mbset and (state.mbset.active or state.mbset.mb1_spell or state.mbset.mb2_spell) then
+        state.mbset.waiting_for_start = false
+        state.mbset.wait_start_time = nil
         reset_mbset('SP発動により中断')
     end
 
@@ -669,6 +778,10 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
     state.current_special.recast_id = recast_id
     state.current_special.target = target
     state.current_special.is_sleep2 = is_sleep2
+    
+    -- 優先度レベルを設定
+    state.current_priority_level = PRIORITY_LEVELS.SPECIAL
+    state.current_priority_start_time = now()
 
     log_msg('start', '【SP】', name, '詠唱開始')
 
@@ -750,13 +863,25 @@ local function process_buffs()
         return
     end
 
-    local ok, reason = can_start_special()
-    if not ok then
+    -- 自動戦闘バフ用の優先度で can_start_special() を待つ
+    -- ただし、自動戦闘バフは待機状態でもログを出さず、静かに待つ
+    local wait_result = wait_can_start_special(PRIORITY_LEVELS.AUTOBUFF, state.combatbuff)
+    
+    if wait_result == "waiting" then
+        -- まだ待機中（静かに待つ）
+        return
+    elseif wait_result == "timeout" or wait_result == "interrupted" then
+        -- タイムアウトまたは割り込み（自動戦闘バフなのでログは出さない）
         return
     end
+    -- wait_result == "ok" の場合は続行
 
     local recasts = windower.ffxi.get_spell_recasts()
     if not recasts then return end
+    
+    -- 自動戦闘バフ実行中の優先度レベルを設定
+    state.current_priority_level = PRIORITY_LEVELS.AUTOBUFF
+    state.current_priority_start_time = now()
 
     -- 空蝉（サブ忍）
     if is_sub_nin() then
@@ -850,11 +975,31 @@ local function buffset_cast_next(list)
     end
 
     if step == 1 and entry.name == "ヘイス��II" then
-        local ok, reason = can_start_special()
-        if not ok then
-            state.buffset.next_time = now() + 0.5
+        -- 強化セット用の優先度で can_start_special() を待つ
+        local wait_result = wait_can_start_special(PRIORITY_LEVELS.BUFFSET, state.buffset)
+        
+        if wait_result == "waiting" then
+            -- まだ待機中
+            state.buffset.next_time = now() + 0.1
+            return
+        elseif wait_result == "timeout" then
+            log_msg('abort', '【buff】', '強化セット', '中断', 'can_start_special待機タイムアウト（5秒）')
+            state.buffset.active = false
+            state.buffset.step = 0
+            state.buffset.waiting_for_finish = false
+            state.buffset.next_step_on_finish = 0
+            state.buffset.next_time = 0
+            return
+        elseif wait_result == "interrupted" then
+            log_msg('abort', '【buff】', '強化セット', '中断', '上位優先度により割り込み')
+            state.buffset.active = false
+            state.buffset.step = 0
+            state.buffset.waiting_for_finish = false
+            state.buffset.next_step_on_finish = 0
+            state.buffset.next_time = 0
             return
         end
+        -- wait_result == "ok" の場合は続行
     end
 
     if not can_act() then
@@ -871,6 +1016,10 @@ local function buffset_cast_next(list)
     if now() - (state.buffset_last_finish_time or 0) < 4.0 then
         return
     end
+    
+    -- 強化セット実行中の優先度レベルを設定
+    state.current_priority_level = PRIORITY_LEVELS.BUFFSET
+    state.current_priority_start_time = now()
 
     cast_spell(
         { name = entry.name, recast_id = spell and spell.recast_id or nil },
@@ -1069,18 +1218,34 @@ local function process_ws()
     local w = state.ws
 
     if w.queued_mode and not w.active then
-        local ok, reason = can_start_special()
-        if ok then
+        -- WS セット用の優先度で can_start_special() を待つ
+        local wait_result = wait_can_start_special(PRIORITY_LEVELS.WS_SET, state.ws)
+        
+        if wait_result == "ok" then
             reset_ws_for_new_set(w.queued_mode)
             log_msg('start', '【WS】', w.queued_mode, 'WSセット', '開始')
             w.logged_reservation = false
             w.queued_mode = nil
+            
+            -- WS セット実行中の優先度レベルを設定
+            state.current_priority_level = PRIORITY_LEVELS.WS_SET
+            state.current_priority_start_time = now()
             return
-        else
+        elseif wait_result == "waiting" then
             if not w.logged_reservation then
                 log_msg('notice', '【WS】', w.queued_mode, 'WS1予約')
                 w.logged_reservation = true
             end
+            return
+        elseif wait_result == "timeout" then
+            log_msg('abort', '【WS】', 'WSセット', '中断', 'can_start_special待機タイムアウト（5秒）')
+            w.queued_mode = nil
+            w.logged_reservation = false
+            return
+        elseif wait_result == "interrupted" then
+            log_msg('abort', '【WS】', 'WSセット', '中断', '上位優先度により割り込み')
+            w.queued_mode = nil
+            w.logged_reservation = false
             return
         end
     end
@@ -1088,7 +1253,7 @@ local function process_ws()
     if not w.active then return end
     if state.current_special.name then return end
 
-    local ok, reason = can_start_special()
+    local ok, reason = can_start_special(PRIORITY_LEVELS.WS_SET)
     if not ok then
         return
     end
@@ -1293,20 +1458,32 @@ local function try_start_mb1(spell_name, target, opts)
     local force_bypass = opts.force_bypass or false
     target = target or '<t>'
 
-    -- No reservation for MB1 - only tick-based check
+    -- No reservation for MB1 - only tick-based check with wait
     if state.current_special.name and not force_bypass then
         return false
     end
 
     if not force_bypass then
-        local ok, reason = can_start_special()
-        if not ok then
+        -- MB セットの優先度で can_start_special() を待つ
+        local wait_result = wait_can_start_special(PRIORITY_LEVELS.MB_SET, state.mbset)
+        
+        if wait_result == "waiting" then
+            -- まだ待機中
+            return false
+        elseif wait_result == "timeout" then
+            log_msg('abort', '【MB】', 'MB1', '中断', 'can_start_special待機タイムアウト（5秒）')
+            return false
+        elseif wait_result == "interrupted" then
+            log_msg('abort', '【MB】', 'MB1', '中断', '上位優先度により割り込み')
             return false
         end
+        -- wait_result == "ok" の場合は続行
     end
 
     if state.ws.active then
         --log_msg('report', '【WS】', 'WSセット', '中断', 'MBセット発動')
+        state.ws.waiting_for_start = false
+        state.ws.wait_start_time = nil
         ws_set_off()
     end
     if state.buffset.active then
@@ -1316,6 +1493,8 @@ local function try_start_mb1(spell_name, target, opts)
         state.buffset.waiting_for_finish = false
         state.buffset.next_step_on_finish = 0
         state.buffset.next_time = 0
+        state.buffset.waiting_for_start = false
+        state.buffset.wait_start_time = nil
     end
     state.suspend_buffs = true
 
@@ -1324,12 +1503,22 @@ local function try_start_mb1(spell_name, target, opts)
     state.mbset.mb1_spell = spell_name
     state.mbset.mb1_target = target
     state.mbset.mb1_start_time = now()
+    
+    -- MB セット実行中の優先度レベルを設定
+    state.current_priority_level = PRIORITY_LEVELS.MB_SET
+    state.current_priority_start_time = now()
 
     local callback = function(result, source_set)
         if result == "success" then
             state.special_delay_until = now() + DELAYS.AFTER_MB_SUCCESS
         else
             state.special_delay_until = now() + DELAYS.AFTER_MB_FAIL
+        end
+        
+        -- 優先度レベルをクリア（MB1 の場合）
+        if source_set == 'mb' and state.current_priority_level == PRIORITY_LEVELS.MB_SET then
+            state.current_priority_level = nil
+            state.current_priority_start_time = nil
         end
     end
 
@@ -1352,22 +1541,41 @@ local function try_start_mb2(spell_name, target)
         return false
     end
 
-    local ok, reason = can_start_special()
-    if not ok then
-        -- MB2 does not have reservation/retry, just skip
+    -- MB2 も can_start_special() を待つ
+    local wait_result = wait_can_start_special(PRIORITY_LEVELS.MB_SET, state.mbset)
+    
+    if wait_result == "waiting" then
+        -- まだ待機中
+        return false
+    elseif wait_result == "timeout" then
+        log_msg('abort', '【MB】', 'MB2', '中断', 'can_start_special待機タイムアウト（5秒）')
+        return false
+    elseif wait_result == "interrupted" then
+        log_msg('abort', '【MB】', 'MB2', '中断', '上位優先度により割り込み')
         return false
     end
+    -- wait_result == "ok" の場合は続行
 
     state.last_spell = spell_name
 
     state.mbset.mb2_spell = spell_name
     state.mbset.mb2_target = target
+    
+    -- MB セット実行中の優先度レベルを維持
+    state.current_priority_level = PRIORITY_LEVELS.MB_SET
+    state.current_priority_start_time = now()
 
     local callback = function(result, source_set)
         if result == "success" then
             state.special_delay_until = now() + DELAYS.AFTER_MB_SUCCESS
         else
             state.special_delay_until = now() + DELAYS.AFTER_MB_FAIL
+        end
+        
+        -- 優先度レベルをクリア（MB2 の場合）
+        if source_set == 'mb' and state.current_priority_level == PRIORITY_LEVELS.MB_SET then
+            state.current_priority_level = nil
+            state.current_priority_start_time = nil
         end
     end
 
@@ -1964,7 +2172,7 @@ windower.register_event('prerender', function()
 
     -- Safety timeout for special spells (using magic_judge.state.active)
     if state.current_special.name and state.current_special.start_time and t - state.current_special.start_time > DELAYS.SAFETY_TIMEOUT_SPECIAL then
-        log_msg('abort', '【safety】', state.current_special.name, '中断', '8秒以上継続')
+        log_msg('abort', '【safety】', state.current_special.name, '中断', '5秒以上継続')
         state.current_special.name = nil
         state.current_special.priority = nil
         state.current_special.start_time = nil
@@ -1979,6 +2187,10 @@ windower.register_event('prerender', function()
 
         state.suspend_buffs = false
         state.buff_resume_time = 0
+        
+        -- 優先度レベルをクリア
+        state.current_priority_level = nil
+        state.current_priority_start_time = nil
 
         if state.retry.active and state.retry.kind == 'special' then
             reset_retry()
@@ -2080,6 +2292,11 @@ windower.register_event('prerender', function()
                 state.current_special.priority = nil
                 state.current_special.start_time = nil
                 state.suspend_buffs = false
+                
+                -- 優先度レベルをクリア
+                state.current_priority_level = nil
+                state.current_priority_start_time = nil
+                
                 reset_retry()
                 return
             end
@@ -2151,6 +2368,10 @@ windower.register_event('prerender', function()
             state.current_special.start_time = nil
 
             state.suspend_buffs = false
+            
+            -- 優先度レベルをクリア
+            state.current_priority_level = nil
+            state.current_priority_start_time = nil
 
             reset_retry()
             return
@@ -2168,6 +2389,10 @@ windower.register_event('prerender', function()
             state.current_special.start_time = nil
 
             state.suspend_buffs = false
+            
+            -- 優先度レベルをクリア
+            state.current_priority_level = nil
+            state.current_priority_start_time = nil
 
             reset_retry()
             return
