@@ -1477,7 +1477,7 @@ local function process_analyzed_ws(result, act)
         log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s count=%d', mb1, mb2, result.sc_en, m.count))
 
         -- Try to start MB1 immediately if possible
-        if not state.casting and not state.current_special.name then
+        if not state.current_special.name then
             local ok, reason = can_start_special()
             if ok then
                 try_start_mb1(m.mb1_spell, m.mb1_target)
@@ -1989,8 +1989,6 @@ windower.register_event('prerender', function()
 
         reset_retry()
 
-        state.casting = false
-        state.cast_fail_time = nil
         state.suspend_buffs = false
         state.first_hit_done = false
         state.last_target_id = current_id
