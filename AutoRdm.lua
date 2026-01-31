@@ -1848,13 +1848,17 @@ local function handle_spell_finish(act)
     -- ②: 通常魔法完了後もディレイを設定（special_delay_until に統一）
     state.special_delay_until = now() + DELAY_CONFIG.magic_complete
 
-    -- 強化セット: ステップ完了
+    -- 強化セット: ステップ完了（magic_judgeの結果を確認）
     if state.buffset.active and state.buffset.waiting_for_finish then
-        state.buffset.waiting_for_finish  = false
-        state.buffset.step                = state.buffset.next_step_on_finish
-        state.buffset.next_step_on_finish = 0
-        state.buffset.next_time           = now() + 0.5
-        state.buffset_last_finish_time    = now()
+        -- buffset spells should be tracked via magic_judge
+        local buffset_result = magic_judge.consume_result_for('buffset')
+        if buffset_result then
+            state.buffset.waiting_for_finish  = false
+            state.buffset.step                = state.buffset.next_step_on_finish
+            state.buffset.next_step_on_finish = 0
+            state.buffset.next_time           = now() + 0.5
+            state.buffset_last_finish_time    = now()
+        end
     end
 
     -- MB1 完了
