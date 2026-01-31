@@ -2072,6 +2072,20 @@ local function emit_combat_end(reason)
     ws_set_off(true)        -- suppress_log = true
     reset_mbset()           -- silent reset (no reason -> no MB finish log)
     reset_ws_chain()        -- Reset WS chain tracking on combat end
+    
+    -- 各種待機状態をクリア
+    state.ws.waiting_for_start = false
+    state.ws.wait_start_time = nil
+    state.mbset.waiting_for_start = false
+    state.mbset.wait_start_time = nil
+    state.buffset.waiting_for_start = false
+    state.buffset.wait_start_time = nil
+    state.combatbuff.waiting_for_start = false
+    state.combatbuff.wait_start_time = nil
+    
+    -- 優先度レベルをクリア
+    state.current_priority_level = nil
+    state.current_priority_start_time = nil
 
     -- 直後の重複出力を抑止（1秒程度）
     state.combat_end_suppressed_until = t + 1.0
@@ -2146,6 +2160,20 @@ windower.register_event('prerender', function()
         state.buffset.waiting_for_finish = false
         state.buffset.next_step_on_finish = 0
         state.buffset.next_time = 0
+        state.buffset.waiting_for_start = false
+        state.buffset.wait_start_time = nil
+        
+        -- 各種待機状態をクリア
+        state.ws.waiting_for_start = false
+        state.ws.wait_start_time = nil
+        state.mbset.waiting_for_start = false
+        state.mbset.wait_start_time = nil
+        state.combatbuff.waiting_for_start = false
+        state.combatbuff.wait_start_time = nil
+        
+        -- 優先度レベルをクリア
+        state.current_priority_level = nil
+        state.current_priority_start_time = nil
 
         reset_retry()
 
@@ -2264,6 +2292,14 @@ windower.register_event('prerender', function()
         state.buffset.waiting_for_finish = false
         state.buffset.next_step_on_finish = 0
         state.buffset.next_time = 0
+        state.buffset.waiting_for_start = false
+        state.buffset.wait_start_time = nil
+        
+        -- 優先度レベルをクリア（BUFFSET の場合）
+        if state.current_priority_level == PRIORITY_LEVELS.BUFFSET then
+            state.current_priority_level = nil
+            state.current_priority_start_time = nil
+        end
     end
 
     if ws_judge and ws_judge.state and ws_judge.check_timeout then ws_judge.check_timeout() end
@@ -2459,6 +2495,8 @@ function reset_all_states()
     state.buffset.next_step_on_finish = 0
     state.buffset.next_time = 0
     state.buffset.step_start_time = 0
+    state.buffset.waiting_for_start = false
+    state.buffset.wait_start_time = nil
 
     reset_retry()
 
@@ -2489,10 +2527,22 @@ function reset_all_states()
     state.buff_resume_time = 0
     state.combatbuff.last_finish_time = 0
     state.combatbuff.suspend_until = nil
+    state.combatbuff.waiting_for_start = false
+    state.combatbuff.wait_start_time = nil
 
     state.buffset_last_finish_time = 0
 
     state.first_hit_done = false
+    
+    -- 各種待機状態をクリア
+    state.ws.waiting_for_start = false
+    state.ws.wait_start_time = nil
+    state.mbset.waiting_for_start = false
+    state.mbset.wait_start_time = nil
+    
+    -- 優先度レベルをクリア
+    state.current_priority_level = nil
+    state.current_priority_start_time = nil
 
     reset_mbset()
     reset_ws_chain()  -- Also reset WS chain tracking on full reset
