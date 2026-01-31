@@ -167,6 +167,7 @@ local state = {
 
     ws = {
         active           = false,
+        priority         = 3, -- ①: WSセットの優先度
         mode             = nil,
         phase            = 'idle',
         phase_started_at = 0,
@@ -205,6 +206,7 @@ local state = {
 
     buffset = {
         active              = false,
+        priority            = 4, -- ⑥d: 強化セットの優先度
         step                = 0,
         next_time           = 0,
         waiting_for_finish  = false,
@@ -231,21 +233,20 @@ local state = {
         priority  = nil,
     },
 
-    casting        = false,
+    -- ②: state.casting と state.combatbuff.casting を廃止
+    -- 詠唱中判定は magic_judge.state.active で統一
     last_target_id = nil,
     last_spell     = nil,
-    cast_fail_time = nil,
     first_hit_done = false,
 
     combatbuff = {
-        casting          = false,
-        start_time       = nil,
+        -- ②: casting フラグを廃止
         last_finish_time = 0,
-        suspend_until    = 0,
 
         pending          = false,
         pending_spell    = nil,
         pending_target   = nil,
+        pending_priority = nil, -- 新規: 予約の優先度
     },
 
     buffset_last_finish_time = 0,
@@ -253,8 +254,7 @@ local state = {
     ws_motion           = false,
     ws_motion_start     = nil,
     ws_delay_until      = 0,
-    magic_delay_until   = 0,
-    special_delay_until = 0,
+    special_delay_until = 0, -- ②: magic_delay_until を廃止し special_delay_until に統一
 
     suspend_buffs    = false,
     buff_resume_time = 0,
@@ -272,6 +272,7 @@ local state = {
         spell_id   = nil,
         kind       = nil,
         from_queue = false,
+        priority   = nil, -- 新規: リトライ元の優先度
     },
 
     last_detected_tp_move_id = nil,
@@ -288,10 +289,11 @@ local state = {
 
 state.mbset = {
     active = false,
+    priority = 2, -- MB Set の優先度 (①: スペシャル魔法＞MBセット＞WSセット＞強化セット＞自動戦闘バフ)
     count = 0,
     last_ws_time = 0,
     thresholds = {11,10,9,8},
-    pending_mb1 = false,
+    pending_mb1 = false, -- ⑥b-1: MB1のみ予約あり
     mb1_spell = nil,
     mb2_spell = nil,
     mb1_target = nil,
@@ -300,12 +302,12 @@ state.mbset = {
     mb2_time = 0,
     last_detected_sc = nil,
     last_props = nil,
-    -- 新規: MB1 -> MB2 を待っているフラグ（タイムアウト挙動分岐用）
     awaiting_mb2 = false,
+    reserved_during_special = false, -- ①: スペシャル魔法中に連携検知した場合の予約フラグ
 }
 
 ------------------------------------------------------------
--- SPECIAL_PRIORITY
+-- SPECIAL_PRIORITY & DELAY CONFIGURATION (④ 統一設定場所)
 ------------------------------------------------------------
 local SPECIAL_PRIORITY = {
     ["スタン"]     = 1,
@@ -316,43 +318,65 @@ local SPECIAL_PRIORITY = {
     ["ケアルIV"]   = 999,
 }
 
+-- ディレイ設定の一元管理
+local DELAY_CONFIG = {
+    -- 魔法完了後のディレイ
+    magic_complete = 3.0,
+    -- WS完了後のディレイ
+    ws_complete = 3.0,
+    -- スペシャル魔法完了後のディレイ
+    special_complete = 3.0,
+    -- 魔法詠唱不可時のディレイ (③ 詠唱不可後ディレイ)
+    cast_fail = 1.5,
+    -- 戦闘バフ完了後のインターバル (⑥e)
+    combatbuff_interval = 6.0,
+    -- MB2発動タイミング (⑥b-2: MB1発動2秒後)
+    mb2_after_mb1 = 2.0,
+}
+
 ------------------------------------------------------------
 -- can_start_special（スペシャル実行ロック判定）
+-- ②: 詠唱中判定を magic_judge.state.active に統一
+-- ⑤: 全魔法・WSの実行前に必ず参照
 ------------------------------------------------------------
 local function can_start_special()
+    -- WS実行中判定
     if state.ws_motion then
         return false, "WSモーション中"
     end
     if now() < state.ws_delay_until then
         return false, "WS完了後ディレイ中"
     end
-    if state.casting then
-        return false, "魔法詠唱中"
-    end
-    if state.combatbuff and state.combatbuff.casting then
-        return false, "戦闘バフ詠唱中"
-    end
+    
+    -- 魔法詠唱中判定 (②: magic_judge.state.active に統一)
     if magic_judge and magic_judge.state and magic_judge.state.active then
         return false, "魔法判定中"
     end
-    if now() < state.magic_delay_until then
-        return false, "魔法完了後ディレイ中"
-    end
+    
+    -- ディレイ判定 (②: special_delay_until に統一)
     if now() < state.special_delay_until then
         return false, "SP完了後ディレイ中"
     end
+    
     return true, nil
 end
 
+------------------------------------------------------------
+-- can_act と is_any_spell_casting
+-- ②: state.casting を廃止し magic_judge.state.active を使用
+------------------------------------------------------------
 local function can_act()
-    return not state.casting
+    -- ②: magic_judge.state.active で詠唱中判定
+    if magic_judge and magic_judge.state and magic_judge.state.active then
+        return false
+    end
+    return true
 end
 
 local function is_any_spell_casting()
-    if state.casting then return true end
+    -- ②: 詠唱中判定は magic_judge.state.active で統一
     if magic_judge and magic_judge.state and magic_judge.state.active then return true end
     if state.current_special and state.current_special.name then return true end
-    if state.combatbuff and state.combatbuff.casting then return true end
     return false
 end
 
@@ -432,6 +456,7 @@ local function reset_retry()
     r.kind = nil
     r.from_queue = false
     r.is_mb = false
+    r.priority = nil
 end
 
 local function start_retry(opts)
@@ -450,6 +475,7 @@ local function start_retry(opts)
     r.kind = opts.kind or nil
     r.from_queue = opts.from_queue or false
     r.is_mb = opts.is_mb or false
+    r.priority = opts.priority or 999
 end
 
 ------------------------------------------------------------
@@ -469,22 +495,36 @@ end
 ------------------------------------------------------------
 -- cast_spell（special / buffset / 他��
 ------------------------------------------------------------
+------------------------------------------------------------
+-- cast_spell（全魔法統一処理）
+-- ②: 全ての魔法を magic_judge 判定を通るようにする
+-- ⑤: 実行前に必ず can_start_special を参照
+------------------------------------------------------------
 local function cast_spell(spell, target, opts)
     opts = opts or {}
     local kind   = opts.kind
     local source = opts.source
+    local source_set = opts.source_set or kind or 'unknown'
     local t      = now()
 
+    -- ⑤: 実行前に can_start_special を確認
+    local ok, reason = can_start_special()
+    if not ok then
+        return false, reason
+    end
+
+    -- リキャスト確認
+    if spell.recast_id and not can_cast(spell.recast_id) then
+        return false, "リキャスト中"
+    end
+
+    -- ②: 全ての魔法を magic_judge でモニタリング開始
+    magic_judge.start(spell.name, source_set)
+    
+    state.last_spell = spell.name
+
+    -- kind 別の処理（リトライ設定等）
     if kind == 'special' then
-        if spell.recast_id and not can_cast(spell.recast_id) then
-            reset_retry()
-            return false
-        end
-
-        state.casting        = true
-        state.last_spell     = spell.name
-        state.cast_fail_time = t + 2.0
-
         if not (state.retry.active and source == 'retry') then
             start_retry{
                 spell_name = spell.name,
@@ -494,30 +534,9 @@ local function cast_spell(spell, target, opts)
                 interval   = opts.interval or 0.5,
                 kind       = 'special',
                 from_queue = opts.from_queue or false,
+                priority   = opts.priority or 999,
             }
         end
-
-        magic_judge.start(spell.name, 'special')
-        send_cmd(('input /ma "%s" %s'):format(spell.name, target or '<me>'))
-        return true
-    end
-
-    if kind == 'buffset' then
-        if not can_act() then return false end
-        if spell.recast_id and not can_cast(spell.recast_id) then return false end
-
-        send_cmd(('input /ma "%s" %s'):format(spell.name, target or '<me>'))
-        return true
-    end
-
-    -- その他（MB 等）
-    if not can_act() then return false end
-    if spell.recast_id and not can_cast(spell.recast_id) then return false end
-
-    if opts.is_mb then
-        state.casting = true
-        state.last_spell = spell.name
-        state.cast_fail_time = t + 2.0
     end
 
     send_cmd(('input /ma "%s" %s'):format(spell.name, target or '<me>'))
@@ -525,28 +544,29 @@ local function cast_spell(spell, target, opts)
 end
 
 ------------------------------------------------------------
--- 戦闘バフ専用 cast_spell（state.casting を使わない）
+-- 戦闘バフ専用 cast_spell
+-- ②: combatbuff も magic_judge を通すように変更
+-- ⑥e: 優先度 5（自動戦闘バフ）
 ------------------------------------------------------------
 local function cast_spell_combatbuff(spell, target)
-    if state.combatbuff.casting then
-        return false
-    end
-
     if spell.recast_id and not can_cast(spell.recast_id) then
         return false
     end
 
+    -- ⑤: can_start_special を確認
     local ok, reason = can_start_special()
     if not ok then
         state.combatbuff.pending = true
         state.combatbuff.pending_spell = spell
         state.combatbuff.pending_target = target or '<me>'
+        state.combatbuff.pending_priority = 5 -- ⑥e: 自動戦闘バフの優先度
         log_msg('notice', '【auto】', spell.name, '予約')
         return true
     end
 
-    state.combatbuff.casting    = true
-    state.combatbuff.start_time = now()
+    -- ②: combatbuff も magic_judge でモニタリング
+    magic_judge.start(spell.name, 'combatbuff')
+    
     send_cmd(('input /ma "%s" %s'):format(spell.name, target or '<me>'))
     return true
 end

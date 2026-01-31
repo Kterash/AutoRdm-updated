@@ -97,6 +97,9 @@ local state = {
     mp_before = 0,
     mp_after  = 0,
     mp_decreased = false,
+    
+    -- ③: 詠唱不可後コールバック（遅延設定のため）
+    on_cast_fail_callback = nil,
 }
 
 magic_judge.state = state
@@ -148,6 +151,11 @@ function magic_judge.check_timeout()
         state.active = false
         state.last_result     = "fail"
         state.last_result_src = state.source_set
+        
+        -- ③: 詠唱不可後コールバック実行
+        if state.on_cast_fail_callback then
+            state.on_cast_fail_callback(state.spell_name, state.source_set, "timeout")
+        end
     end
 end
 
@@ -253,6 +261,11 @@ windower.register_event('incoming chunk', function(id, data)
         state.active = false
         state.last_result     = "fail"
         state.last_result_src = state.source_set
+        
+        -- ③: 詠唱不可後コールバック実行
+        if state.on_cast_fail_callback then
+            state.on_cast_fail_callback(state.spell_name, state.source_set, "incoming_chunk")
+        end
     end
 end)
 
