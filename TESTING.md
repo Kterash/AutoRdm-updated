@@ -24,15 +24,21 @@ This document describes how to manually test the fixes for WS1 and MB1 execution
 ### Test Scenario 2: WS1 Retry on Failure
 **Steps:**
 1. Activate a WS set
-2. Let WS1 execute and fail (e.g., miss, out of range)
+2. Let WS1 execute and experience a failure:
+   - **Server-side failure:** Miss, out of range, target dead, etc.
+   - **Client-side failure:** "No action category" (アクションカテゴリなし) - detected via 1.5s timeout
 3. Observe the log: Should see "WS1 リトライ移行" (WS1 retry transition)
 4. Verify WS1 retry waits for proper timing with "WS1リトライ待機" if needed
 5. Verify WS1 retry executes when ready
 
 **Expected Result:**
 - WS1 automatically retries after failure
+- Both server-side and client-side failures trigger retry
+- Timeout mechanism (1.5s) catches "no action category" failures
 - Retry also waits for `can_start_special()` timing
 - No immediate execution causing errors
+
+**Note:** Client-side failures (like "no action category" when casting/in motion) are detected via timeout, not incoming text messages.
 
 ## Issue ②: MB1 Execution Flow (Fixed)
 
@@ -88,9 +94,12 @@ This document describes how to manually test the fixes for WS1 and MB1 execution
 
 ### For WS1:
 - ❌ "Unable to use weapon skill" errors when trying to execute
-- ❌ "no action category" (アクションカテゴリなし) errors
+- ❌ "no action category" (アクションカテゴリなし) errors - these should trigger retry after 1.5s timeout
 - ❌ WS1 executing during spell casting
 - ❌ WS1 retry not happening after failure
+- ❌ Timeout detection not working (failures not detected within 1.5s)
+
+**Note:** "No action category" failures are normal when WS is blocked client-side (e.g., during casting). They should be detected via timeout and trigger retry.
 
 ### For MB1:
 - ❌ "魔法が唱えられない" (cannot cast spell) errors

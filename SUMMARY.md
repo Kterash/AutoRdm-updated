@@ -54,6 +54,24 @@ Question: Is the behavior as follows?
    - "WS1実行待機" for initial execution (line 1282)
    - "WS1リトライ待機" for retry (line 1301)
 
+**How WS1 Failure Detection Works:**
+
+The code uses **two mechanisms** to detect WS1 failures:
+
+1. **Action Packet Detection (ws_judge.lua lines 140-174):**
+   - When WS executes successfully and produces an action packet
+   - Checks message ID and damage parameter
+   - Handles server-side failures (miss, no effect, out of range, etc.)
+
+2. **Timeout Detection (ws_judge.lua lines 80-90):**
+   - When no action packet arrives within 1.5 seconds
+   - Called from AutoRdm.lua line 2403: `ws_judge.check_timeout()`
+   - Handles client-side failures including **"no action category" (アクションカテゴリなし)**
+   - This is the primary mechanism for detecting execution blocks
+
+**Note on Commented-Out Code:**
+The incoming text event handler (ws_judge.lua lines 207-228) is commented out because **it doesn't function properly**. The timeout mechanism is more reliable for detecting client-side failures.
+
 **Conclusion:** WS1 execution flow is already correctly implemented. No changes needed.
 
 ### Issue ②: MB1 - FIXED ✅
@@ -104,6 +122,12 @@ end
 | Processing Function | `process_ws()` | `process_mbset_in_prerender()` |
 | Immediate Execution | ❌ No (waits for timing) | ❌ No (waits for timing) |
 | Retry Mechanism | ✅ Yes (ws1_retry phase) | ❌ No (not needed for magic) |
+| Failure Detection | Action packet + Timeout (1.5s) | magic_judge monitors spell |
+
+**WS1 Failure Detection Details:**
+- **Action Packet:** Detects server-side failures (miss, out of range, etc.)
+- **Timeout (1.5s):** Detects client-side failures including "no action category" (アクションカテゴリなし)
+- **Commented-Out Handler:** The incoming text handler (ws_judge.lua lines 207-228) doesn't work, so timeout is used instead
 
 ## Benefits
 
