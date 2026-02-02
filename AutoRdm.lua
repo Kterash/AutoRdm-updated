@@ -1508,7 +1508,9 @@ local function process_analyzed_ws(result, act)
                 log_msg('notice', '【MB】', m.mb1_spell, '予約')
             end
         else
-            log_msg('notice', '【MB】', m.mb1_spell, '予約')
+            -- ①: スペシャル魔法中に連携検知した場合、reserved_during_special フラグを設定
+            m.reserved_during_special = true
+            log_msg('notice', '【MB】', m.mb1_spell, 'スペシャル魔法中に予約')
         end
         return
     end
