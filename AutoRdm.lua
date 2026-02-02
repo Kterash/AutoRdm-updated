@@ -300,6 +300,7 @@ state.mbset = {
     mb2_target = nil,
     mb1_start_time = nil,
     mb2_time = 0,
+    mb2_release_time = 0,
     last_detected_sc = nil,
     last_props = nil,
     awaiting_mb2 = false,
@@ -1282,6 +1283,7 @@ reset_mbset = function(reason)
     m.mb2_target = nil
     m.mb1_start_time = nil
     m.mb2_time = 0
+    m.mb2_release_time = 0
     m.last_detected_sc = nil
     m.awaiting_mb2 = false
     m.reserved_during_special = false
@@ -1572,6 +1574,7 @@ local function process_mbset_in_prerender(t)
         if state.current_special.name then
             log_msg('abort', '【MB】', m.mb2_spell or 'MB2', '中断', 'スペシャル魔法中')
             m.mb2_time = 0
+            m.mb2_release_time = 0
             return
         end
         if m.mb2_spell then
