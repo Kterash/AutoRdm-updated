@@ -2273,6 +2273,8 @@ windower.register_event('prerender', function()
                 if ok_mb then
                     log_msg('report', '【MB】', state.mbset.mb1_spell, 'SP終了後に実行')
                     try_start_mb1(state.mbset.mb1_spell, state.mbset.mb1_target, {force_bypass = false})
+                else
+                    log_msg('notice', '【MB】', state.mbset.mb1_spell, 'SP終了後実行待機', reason_mb or '実行不可')
                 end
                 state.mbset.reserved_during_special = false
             end
