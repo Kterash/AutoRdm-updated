@@ -1644,8 +1644,9 @@ local function process_analyzed_ws(result, act)
         -- Log MB set start
         log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (add_msg=%d)', mb1, mb2, sc_en or 'unknown', add_msg))
         
-        -- MB1 is reserved with pending_mb1 flag
+        -- MB1 is reserved via pending_mb1 flag (set above at line 1640)
         -- process_mbset_in_prerender() will handle the actual execution when can_start_special() is ready
+        -- This prevents immediate execution that could cause "cannot cast spell" errors
         if state.current_special.name then
             m.reserved_during_special = true
             log_msg('notice', '【MB】', m.mb1_spell, 'スペシャル魔法中に予約')
