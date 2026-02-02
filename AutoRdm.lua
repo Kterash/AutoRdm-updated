@@ -2045,8 +2045,6 @@ windower.register_event('action', handle_spell_finish)
 -- incoming chunk: Action Message (0x29) handler for skillchain detection
 -- This detects skillchains from action message packets and triggers MB set
 ------------------------------------------------------------
-local packets = require('packets')
-
 windower.register_event('incoming chunk', function(id, data)
     -- Only process Action Message packets (0x29)
     if id ~= 0x29 then return end
