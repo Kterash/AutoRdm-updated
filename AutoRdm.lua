@@ -1284,6 +1284,7 @@ reset_mbset = function(reason)
     m.mb2_time = 0
     m.last_detected_sc = nil
     m.awaiting_mb2 = false
+    m.reserved_during_special = false
 
     state.suspend_buffs = false
     state.buff_resume_time = now()
@@ -1571,7 +1572,6 @@ local function process_mbset_in_prerender(t)
         if state.current_special.name then
             log_msg('abort', '【MB】', m.mb2_spell or 'MB2', '中断', 'スペシャル魔法中')
             m.mb2_time = 0
-            m.pending_mb1 = false
             return
         end
         if m.mb2_spell then
@@ -1692,6 +1692,7 @@ windower.register_event('action', function(act)
                 state.ws.ws1_retry_count = (state.ws.ws1_retry_count or 0)
                 state.ws.phase = 'ws1_retry'
                 state.ws.phase_started_at = now()
+                state.ws.retry_wait_logged = false
                 return
             end
 
@@ -1714,6 +1715,7 @@ windower.register_event('action', function(act)
 
             state.ws.phase = 'ws2'
             state.ws.phase_started_at = now()
+            state.ws.retry_wait_logged = false
             log_msg('report', '【WS】', state.ws.ws1_name, '実行', 'WS1 成功')
             return
         end
