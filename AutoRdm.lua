@@ -639,6 +639,9 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
 
     -- ここで MB が進行中なら完全終了（再開しない）
     if state.mbset and (state.mbset.active or state.mbset.pending_mb1 or state.mbset.mb1_spell or state.mbset.mb2_spell) then
+        -- ①: MB2のタイマーも明示的にクリア
+        state.mbset.mb2_time = 0
+        state.mbset.mb2_release_time = 0
         reset_mbset('SP発動により中断')
     end
 
@@ -1098,19 +1101,39 @@ local function process_ws()
 
     if phase == 'ws1' then
         if tp < 1000 then return end
+        -- ②: WS1実行前に can_start_special() を再確認
+        local ok_ws1, reason_ws1 = can_start_special()
+        if not ok_ws1 then
+            if not w.retry_wait_logged then
+                log_msg('notice', '【WS】', cfg.ws1, 'WS1実行待機', reason_ws1 or '実行不可')
+                w.retry_wait_logged = true
+            end
+            return
+        end
         send_cmd(('input /ws "%s" <t>'):format(cfg.ws1))
         if ws_judge then ws_judge.start(cfg.ws1, "WS1") end
         w.phase = 'ws1_wait'
         w.phase_started_at = now()
+        w.retry_wait_logged = false
         return
     end
 
     if phase == 'ws1_retry' then
         if tp < 1000 then return end
+        -- ②: WS1リトライ実行前に can_start_special() を再確認
+        local ok_retry, reason_retry = can_start_special()
+        if not ok_retry then
+            if not w.retry_wait_logged then
+                log_msg('notice', '【WS】', cfg.ws1, 'WS1リトライ待機', reason_retry or '実行不可')
+                w.retry_wait_logged = true
+            end
+            return
+        end
         send_cmd(('input /ws "%s" <t>'):format(cfg.ws1))
         if ws_judge then ws_judge.start(cfg.ws1, "WS1") end
         w.phase = 'ws1_wait'
         w.phase_started_at = now()
+        w.retry_wait_logged = false
         return
     end
 
@@ -1542,6 +1565,13 @@ local function process_mbset_in_prerender(t)
 
     -- ⑥b-2: MB2 は MB1発動2秒後に実行
     if m.mb2_time and m.mb2_time > 0 and t >= m.mb2_time then
+        -- ③: スペシャル魔法進行中なら MB2 を実行しない
+        if state.current_special.name then
+            log_msg('abort', '【MB】', m.mb2_spell or 'MB2', '中断', 'スペシャル魔法中')
+            m.mb2_time = 0
+            m.pending_mb1 = false
+            return
+        end
         if m.mb2_spell then
             try_start_mb2(m.mb2_spell, m.mb2_target)
         end
@@ -2229,6 +2259,17 @@ windower.register_event('prerender', function()
             state.suspend_buffs = false
 
             reset_retry()
+            
+            -- ①: スペシャル魔法終了後、予約されていた MB1 を can_start_special() を確認してから実行
+            if state.mbset.reserved_during_special and state.mbset.pending_mb1 and state.mbset.mb1_spell then
+                local ok_mb, reason_mb = can_start_special()
+                if ok_mb then
+                    log_msg('report', '【MB】', state.mbset.mb1_spell, 'SP終了後に実行')
+                    try_start_mb1(state.mbset.mb1_spell, state.mbset.mb1_target, {force_bypass = false})
+                end
+                state.mbset.reserved_during_special = false
+            end
+            
             return
         elseif r == "fail" then
             enqueue_special_spell(
