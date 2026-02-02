@@ -2438,7 +2438,8 @@ windower.register_event('prerender', function()
             reset_retry()
             return
         end
-        return
+        -- ②: 結果が未確定(nil)の場合、リトライロジックに進むためreturnしない
+        -- これによりタイムアウト後のリトライが正常に機能する
     end
 
     if state.ws.active then

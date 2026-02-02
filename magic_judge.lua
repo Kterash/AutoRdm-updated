@@ -231,6 +231,12 @@ function magic_judge.on_action(act)
         state.active = false
         state.last_result     = "fail"
         state.last_result_src = state.source_set
+        
+        -- ③: 詠唱不可後コールバック実行（action判定でも）
+        if state.on_cast_fail_callback then
+            state.on_cast_fail_callback(state.spell_name, state.source_set, "action_packet")
+        end
+        
         return
     end
 end
