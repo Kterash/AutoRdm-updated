@@ -1590,14 +1590,18 @@ local function process_mbset_in_prerender(t)
                 m.mb2_time = 0
                 m.mb2_release_time = 0
                 m.pending_mb1 = false
+                m.awaiting_mb2 = false
             else
                 m.mb2_time = 0
                 m.mb2_release_time = 0
                 m.pending_mb1 = false
+                m.awaiting_mb2 = false
             end
         else
             -- まだ実行不可の場合は、タイムアウトチェック
             -- MB2タイムアウト: MB2予定時刻から最大3秒待機（special_complete相当）
+            -- 注意: awaiting_mb2をクリアして、既存のLONG_TIMEOUTと競合しないようにする
+            m.awaiting_mb2 = false
             local MB2_WAIT_TIMEOUT = 3.0
             if t - m.mb2_time > MB2_WAIT_TIMEOUT then
                 log_msg('abort', '【MB】', m.mb2_spell or 'MB2', '中断', string.format('タイムアウト(%s)', reason or '不明'))
