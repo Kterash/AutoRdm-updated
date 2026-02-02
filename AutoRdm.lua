@@ -34,14 +34,49 @@ local JOB_BLM = 4
 -- These IDs confirm actual skillchain occurrence in action packets
 ------------------------------------------------------------
 local SC_SKILLCHAIN_IDS = {
-    [288] = true,  -- Fragmentation
-    [289] = true,  -- Distortion
-    [290] = true,  -- Fusion
-    [291] = true,  -- Gravitation
-    [385] = true,  -- Light
-    [386] = true,  -- Darkness
+    -- Level 2/3 Skillchains (damage)
+    [288] = true,  -- Light
+    [289] = true,  -- Darkness
+    [290] = true,  -- Gravitation
+    [291] = true,  -- Fragmentation
     [767] = true,  -- Radiance
     [768] = true,  -- Umbra
+    
+    -- Level 1 Skillchains (damage)
+    [292] = true,  -- Distortion
+    [293] = true,  -- Fusion
+    [294] = true,  -- Compression
+    [295] = true,  -- Liquefaction
+    [296] = true,  -- Induration
+    [297] = true,  -- Reverberation
+    [298] = true,  -- Transfixion
+    [299] = true,  -- Scission
+    [300] = true,  -- Detonation
+    [301] = true,  -- Impaction
+    [302] = true,  -- Cosmic Elucidation
+    
+    -- Level 2/3 Skillchains (healing)
+    [385] = true,  -- Light
+    [386] = true,  -- Darkness
+    
+    -- Level 1 Skillchains (healing)
+    [387] = true,  -- Gravitation
+    [388] = true,  -- Fragmentation
+    [389] = true,  -- Distortion
+    [390] = true,  -- Fusion
+    [391] = true,  -- Compression
+    [392] = true,  -- Liquefaction
+    [393] = true,  -- Induration
+    [394] = true,  -- Reverberation
+    [395] = true,  -- Transfixion
+    [396] = true,  -- Scission
+    [397] = true,  -- Detonation
+    [398] = true,  -- Impaction
+    
+    -- Other skillchain variants
+    [732] = true,  -- Universal Enlightenment
+    [769] = true,  -- Radiance (healing)
+    [770] = true,  -- Umbra (healing)
 }
 
 ------------------------------------------------------------

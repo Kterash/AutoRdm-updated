@@ -21,19 +21,63 @@ local SC_MESSAGE_IDS = {
 }
 
 local SC_SKILLCHAIN_IDS = {
+    -- Level 2/3 Skillchains (damage)
     [288] = true, [289] = true, [290] = true, [291] = true,
-    [385] = true, [386] = true, [767] = true, [768] = true,
+    [767] = true, [768] = true,
+    -- Level 1 Skillchains (damage)
+    [292] = true, [293] = true, [294] = true, [295] = true,
+    [296] = true, [297] = true, [298] = true, [299] = true,
+    [300] = true, [301] = true, [302] = true,
+    -- Level 2/3 Skillchains (healing)
+    [385] = true, [386] = true,
+    -- Level 1 Skillchains (healing)
+    [387] = true, [388] = true, [389] = true, [390] = true,
+    [391] = true, [392] = true, [393] = true, [394] = true,
+    [395] = true, [396] = true, [397] = true, [398] = true,
+    -- Other skillchain variants
+    [732] = true, [769] = true, [770] = true,
 }
 
 local SC_MESSAGES_FROM_AEM = {
-    [288] = 'Fragmentation',
-    [289] = 'Distortion',
-    [290] = 'Fusion',
-    [291] = 'Gravitation',
-    [385] = 'Light',
-    [386] = 'Darkness',
+    -- Level 2/3 Skillchains
+    [288] = 'Light',
+    [289] = 'Darkness',
+    [290] = 'Gravitation',
+    [291] = 'Fragmentation',
     [767] = 'Radiance',
     [768] = 'Umbra',
+    -- Level 1 Skillchains
+    [292] = 'Distortion',
+    [293] = 'Fusion',
+    [294] = 'Compression',
+    [295] = 'Liquefaction',
+    [296] = 'Induration',
+    [297] = 'Reverberation',
+    [298] = 'Transfixion',
+    [299] = 'Scission',
+    [300] = 'Detonation',
+    [301] = 'Impaction',
+    [302] = 'Cosmic Elucidation',
+    -- Healing variants (Level 2/3)
+    [385] = 'Light',
+    [386] = 'Darkness',
+    [387] = 'Gravitation',
+    [388] = 'Fragmentation',
+    [389] = 'Distortion',
+    [390] = 'Fusion',
+    -- Healing variants (Level 1)
+    [391] = 'Compression',
+    [392] = 'Liquefaction',
+    [393] = 'Induration',
+    [394] = 'Reverberation',
+    [395] = 'Transfixion',
+    [396] = 'Scission',
+    [397] = 'Detonation',
+    [398] = 'Impaction',
+    -- Other variants
+    [732] = 'Universal Enlightenment',
+    [769] = 'Radiance',
+    [770] = 'Umbra',
 }
 
 local function sc_is_hit_success(hit_action)
