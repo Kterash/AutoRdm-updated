@@ -454,7 +454,7 @@ local SPECIAL_PRIORITY = {
     ["スリプルII"] = 3,
     ["サイレス"]   = 4,
     ["ディスペル"] = 5,
-    ["ケアルIV"]   = 999,
+    ["ケアルIV"]   = 999,  -- 999 = 最低優先度（デフォルト値としても使用）
 }
 
 -- ディレイ設定の一元管理
@@ -471,6 +471,8 @@ local DELAY_CONFIG = {
     combatbuff_interval = 6.0,
     -- MB2発動タイミング (⑥b-2: MB1発動3秒後)
     mb2_after_mb1 = 3.0,
+    -- ②: スペシャル魔法・キュー・リトライのタイムアウト（秒）
+    special_timeout = 8.0,
 }
 
 ------------------------------------------------------------
@@ -859,12 +861,12 @@ windower.register_event('keyboard', function(dik, down)
         state.sleep2_initial_start_time = 0
 
         -- ①: Sleep2 初回の成否判定をチェック
-        local r = nil
+        local magic_result = nil
         if magic_judge and magic_judge.consume_result_for then
-            r = magic_judge.consume_result_for("special")
+            magic_result = magic_judge.consume_result_for("special")
         end
 
-        if r == "fail" then
+        if magic_result == "fail" then
             -- 初回が失敗していたら、再試行をキューに追加
             log_msg('report', '【SP】', name, 'Enter確認後失敗検知', 'キューに追加')
             enqueue_special_spell(name, recast_id, '<lastst>', true, '理由: 初回失敗')
@@ -2283,19 +2285,19 @@ windower.register_event('prerender', function()
         end
     end
 
-    -- ⑦ 安全装置: magic_judge のタイムアウト（8秒）
+    -- ⑦ 安全装置: magic_judge のタイムアウト
     if magic_judge and magic_judge.state and magic_judge.state.active 
-       and magic_judge.state.start_time and (t - magic_judge.state.start_time) > 8 then
-        log_msg('abort', '【safety】', magic_judge.state.spell_name or '魔法', '中断', '8秒以上継続')
+       and magic_judge.state.start_time and (t - magic_judge.state.start_time) > DELAY_CONFIG.special_timeout then
+        log_msg('abort', '【safety】', magic_judge.state.spell_name or '魔法', '中断', DELAY_CONFIG.special_timeout .. '秒以上継続')
         magic_judge.state.active = false
         magic_judge.state.last_result = "fail"
         magic_judge.state.last_result_src = magic_judge.state.source_set
         reset_retry()
     end
 
-    -- ⑦ 安全装置: スペシャル魔法のタイムアウト（8秒）
-    if state.current_special.name and state.current_special.start_time and t - state.current_special.start_time > 8 then
-        log_msg('abort', '【safety】', state.current_special.name, '中断', '8秒以上継続')
+    -- ⑦ 安全装置: スペシャル魔法のタイムアウト
+    if state.current_special.name and state.current_special.start_time and t - state.current_special.start_time > DELAY_CONFIG.special_timeout then
+        log_msg('abort', '【safety】', state.current_special.name, '中断', DELAY_CONFIG.special_timeout .. '秒以上継続')
         state.current_special.name = nil
         state.current_special.priority = nil
         state.current_special.start_time = nil
@@ -2317,10 +2319,10 @@ windower.register_event('prerender', function()
         end
     end
 
-    -- ②: キュー登録されたスペシャル魔法のタイムアウト（8秒）
+    -- ②: キュー登録されたスペシャル魔法のタイムアウト
     if state.queued_special.name and state.queued_special.queue_time > 0 
-       and t - state.queued_special.queue_time > 8 then
-        log_msg('abort', '【safety】', state.queued_special.name, 'キュー中断', '8秒タイムアウト')
+       and t - state.queued_special.queue_time > DELAY_CONFIG.special_timeout then
+        log_msg('abort', '【safety】', state.queued_special.name, 'キュー中断', DELAY_CONFIG.special_timeout .. '秒タイムアウト')
         state.queued_special.name = nil
         state.queued_special.recast_id = nil
         state.queued_special.target = nil
@@ -2329,9 +2331,9 @@ windower.register_event('prerender', function()
         state.queued_special.queue_time = 0
     end
 
-    -- ①: Sleep2 初回待機のタイムアウト（8秒）
+    -- ①: Sleep2 初回待機のタイムアウト
     if state.sleep2_waiting_for_confirm and state.sleep2_initial_start_time > 0 
-       and t - state.sleep2_initial_start_time > 8 then
+       and t - state.sleep2_initial_start_time > DELAY_CONFIG.special_timeout then
         log_msg('abort', '【safety】', state.sleep2_name or 'Sleep2', '中断', 'Enter待機タイムアウト')
         state.sleep2_initial = false
         state.sleep2_waiting_for_confirm = false
@@ -2417,9 +2419,9 @@ windower.register_event('prerender', function()
 
     -- ⑥a: スペシャル魔法のリトライ処理
     if state.retry.active then
-        -- ②: リトライのタイムアウト（8秒）
-        if state.retry.start_time > 0 and t - state.retry.start_time > 8 then
-            log_msg('abort', '【retry】', state.retry.spell_name or 'リトライ', '中断', '8秒タイムアウト')
+        -- ②: リトライのタイムアウト
+        if state.retry.start_time > 0 and t - state.retry.start_time > DELAY_CONFIG.special_timeout then
+            log_msg('abort', '【retry】', state.retry.spell_name or 'リトライ', '中断', DELAY_CONFIG.special_timeout .. '秒タイムアウト')
             reset_retry()
             return
         end
