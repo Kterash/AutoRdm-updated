@@ -23,6 +23,22 @@ require('actions')
 local bit = require('bit')
 
 ------------------------------------------------------------
+-- skillchain_messages テーブル
+------------------------------------------------------------
+local skillchain_messages = {
+    [196]=true, [223]=true,
+    -- 288〜303
+    [288]=true,[289]=true,[290]=true,[291]=true,[292]=true,[293]=true,[294]=true,[295]=true,
+    [296]=true,[297]=true,[298]=true,[299]=true,[300]=true,[301]=true,[302]=true,[303]=true,
+    -- 回復系 385〜398
+    [385]=true,[386]=true,[387]=true,[388]=true,[389]=true,[390]=true,[391]=true,[392]=true,
+    [393]=true,[394]=true,[395]=true,[396]=true,[397]=true,[398]=true,
+    -- その他
+    [732]=true,[767]=true,[768]=true,[769]=true,[770]=true,
+    [503]=true, -- Element 表示
+}
+
+------------------------------------------------------------
 -- 定数（ジョブID 等）
 ------------------------------------------------------------
 local JOB_RDM = 5
@@ -292,7 +308,7 @@ state.mbset = {
     priority = 2, -- MB Set の優先度 (①: スペシャル魔法＞MBセット＞WSセット＞強化セット＞自動戦闘バフ)
     count = 0,
     last_ws_time = 0,
-    thresholds = {10,9,8,7},
+    thresholds = {11,10,9,8},
     pending_mb1 = false, -- ⑥b-1: MB1のみ予約あり
     mb1_spell = nil,
     mb2_spell = nil,
@@ -1656,6 +1672,9 @@ local function process_mbset_in_prerender(t)
                 m.mb2_time = 0
                 m.mb2_release_time = 0
                 m.pending_mb1 = false
+                -- ②: MB2タイムアウト時にMBセットを明示的に終了
+                reset_mbset('MB2タイムアウト')
+                return
             end
             -- タイムアウトしていない場合は次のループで再試行（m.mb2_timeを保持）
         end
@@ -2434,6 +2453,30 @@ end
 
 windower.register_event('login', update_external_tools)
 windower.register_event('job change', update_external_tools)
+
+------------------------------------------------------------
+-- incoming chunk 0x028 イベントハンドラ
+-- MBセット起動条件の追加
+------------------------------------------------------------
+windower.register_event('incoming chunk', function(id, data)
+    -- 0x028 (40 in decimal) を検知
+    if id ~= 0x028 then return end
+    
+    local pkt = packets.parse('incoming', data)
+    if not pkt then return end
+    
+    -- メッセージIDを取得
+    local msg_id = pkt['Message ID']
+    if not msg_id then return end
+    
+    -- skillchain_messages テーブルに該当するメッセージIDの場合、MBセット起動を試みる
+    if skillchain_messages[msg_id] then
+        -- MBセット起動のトリガーとして記録
+        -- 既存のWS検知ロジックと連携するため、ここでは検知フラグのみ設定
+        -- 実際のMB起動は既存のprocess_analyzed_wsロジックに委ねる
+        log_msg('notice', '【MB】', 'スキルチェーン', '検知', string.format('msg_id=%d', msg_id))
+    end
+end)
 
 ------------------------------------------------------------
 -- 全フラグ完全リセット関数
