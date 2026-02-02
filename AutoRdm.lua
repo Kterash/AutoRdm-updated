@@ -30,6 +30,21 @@ local JOB_NIN = 13
 local JOB_BLM = 4
 
 ------------------------------------------------------------
+-- Skillchain IDs (add_effect_message)
+-- These IDs confirm actual skillchain occurrence in action packets
+------------------------------------------------------------
+local SC_SKILLCHAIN_IDS = {
+    [288] = true,  -- Fragmentation
+    [289] = true,  -- Distortion
+    [290] = true,  -- Fusion
+    [291] = true,  -- Gravitation
+    [385] = true,  -- Light
+    [386] = true,  -- Darkness
+    [767] = true,  -- Radiance
+    [768] = true,  -- Umbra
+}
+
+------------------------------------------------------------
 -- spells（必要最小限の魔法定義）
 ------------------------------------------------------------
 local spells = {
@@ -1477,9 +1492,15 @@ local function process_analyzed_ws(result, act)
     -- WS_Detector analyzes the action packet (0x028) and detects skillchains either:
     -- 1. From add_effect_message (packet-based, Level 2/3 SCs)
     -- 2. From WS property calculation (when ws1_props available, Level 1 SCs)
-    local sc_detected = (result.sc_en ~= nil)
+    -- 
+    -- MB set should only trigger when add_effect_message confirms actual skillchain
+    -- Using SC_SKILLCHAIN_IDS table to validate packet-based skillchain confirmation
+    -- Note: add_effect_msg defaults to 0 when not present; SC_SKILLCHAIN_IDS[0] is nil, 
+    -- so the check correctly fails when no skillchain message is present
+    local add_effect_msg = result.add_effect_message or 0
+    local sc_confirmed_by_packet = SC_SKILLCHAIN_IDS[add_effect_msg]
     
-    if sc_detected then
+    if sc_confirmed_by_packet then
         -- Check if there's an active MB set to terminate
         local was_active = m.active or m.mb1_spell or m.mb2_spell or m.pending_mb1
         if was_active then
@@ -1503,12 +1524,9 @@ local function process_analyzed_ws(result, act)
         m.last_props = result.props
 
         -- MBセット開始ログ
-        local add_effect_msg = result.add_effect_message or 0
-        if add_effect_msg > 0 then
-            log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (packet:msg=%d)', mb1, mb2, result.sc_en, add_effect_msg))
-        else
-            log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (calculated)', mb1, mb2, result.sc_en))
-        end
+        -- At this point, add_effect_msg is guaranteed to be a valid skillchain ID
+        -- because we're inside the sc_confirmed_by_packet check
+        log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (packet:msg=%d)', mb1, mb2, result.sc_en, add_effect_msg))
 
         -- Try to start MB1 immediately if possible
         if not state.current_special.name then
