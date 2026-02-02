@@ -491,7 +491,8 @@ local function can_start_special()
     
     -- ディレイ判定 (②: special_delay_until に統一)
     if now() < state.special_delay_until then
-        return false, "SP完了後ディレイ中"
+        local remaining = state.special_delay_until - now()
+        return false, string.format("SP完了後ディレイ中 (残り%.2f秒)", remaining)
     end
     
     return true, nil
@@ -654,6 +655,10 @@ local function cast_spell(spell, target, opts)
         return false, "リキャスト中"
     end
 
+    -- ③: 詠唱不可リスクに備えて送信前にディレイを設定
+    -- これにより同一prerender内で後続の魔法が実行されるのを防ぐ
+    state.special_delay_until = now() + DELAY_CONFIG.cast_fail
+
     -- ②: 全ての魔法を magic_judge でモニタリング開始
     magic_judge.start(spell.name, source_set)
     
@@ -683,6 +688,7 @@ end
 -- 戦闘バフ専用 cast_spell
 -- ②: combatbuff も magic_judge を通すように変更
 -- ⑥e: 優先度 5（自動戦闘バフ）
+-- ③: 詠唱不可リスクに備えて送信前にディレイ設定
 ------------------------------------------------------------
 local function cast_spell_combatbuff(spell, target)
     if spell.recast_id and not can_cast(spell.recast_id) then
@@ -700,6 +706,10 @@ local function cast_spell_combatbuff(spell, target)
         return true
     end
 
+    -- ③: 詠唱不可リスクに備えて送信前にディレイを設定
+    -- これにより同一prerender内で後続の魔法が実行されるのを防ぐ
+    state.special_delay_until = now() + DELAY_CONFIG.cast_fail
+    
     -- ②: combatbuff も magic_judge でモニタリング
     magic_judge.start(spell.name, 'combatbuff')
     
@@ -813,6 +823,10 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
     state.queued_special.target = nil
     state.queued_special.is_sleep2 = false
     state.queued_special.priority = nil
+
+    -- ③: 詠唱不可リスクに備えて送信前にディレイを設定
+    -- これにより同一prerender内で後続の魔法が実行されるのを防ぐ
+    state.special_delay_until = now() + DELAY_CONFIG.cast_fail
 
     magic_judge.start(name, "special")
 
@@ -1517,6 +1531,9 @@ local function try_start_mb1(spell_name, target, opts)
     state.mbset.mb1_start_time = now()
     state.mbset.pending_mb1 = false
 
+    -- ③: 詠唱不可リスクに備えて送信前にディレイを設定
+    state.special_delay_until = now() + DELAY_CONFIG.cast_fail
+
     -- ②: magic_judge でモニタリング開始
     magic_judge.start(spell_name, 'mbset')
     
@@ -1550,6 +1567,9 @@ local function try_start_mb2(spell_name, target)
 
     state.mbset.mb2_spell = spell_name
     state.mbset.mb2_target = target
+
+    -- ③: 詠唱不可リスクに備えて送信前にディレイを設定
+    state.special_delay_until = now() + DELAY_CONFIG.cast_fail
 
     -- ②: magic_judge でモニタリング開始
     magic_judge.start(spell_name, 'mbset')
@@ -2438,7 +2458,8 @@ windower.register_event('prerender', function()
             reset_retry()
             return
         end
-        return
+        -- ②: 結果が未確定(nil)の場合、リトライロジックに進むためreturnしない
+        -- これによりタイムアウト後のリトライが正常に機能する
     end
 
     if state.ws.active then
@@ -2563,8 +2584,9 @@ end
 if magic_judge and magic_judge.state then
     magic_judge.state.on_cast_fail_callback = function(spell_name, source_set, reason)
         -- ③: 詠唱不可後ディレイを設定し、can_start_special に含める
-        state.special_delay_until = now() + DELAY_CONFIG.cast_fail
-        log_msg('abort', string.format('【%s】', source_set or 'unknown'), spell_name or '', '詠唱不可', reason or '')
+        local delay_time = DELAY_CONFIG.cast_fail
+        state.special_delay_until = now() + delay_time
+        log_msg('abort', string.format('【%s】', source_set or 'unknown'), spell_name or '', '詠唱不可', string.format('%s (ディレイ%.1f秒設定)', reason or '', delay_time))
     end
 end
 
