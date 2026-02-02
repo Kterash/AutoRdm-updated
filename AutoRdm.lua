@@ -655,7 +655,11 @@ local function cast_spell(spell, target, opts)
     end
 
     -- ②: 全ての魔法を magic_judge でモニタリング開始
-    magic_judge.start(spell.name, source_set)
+    -- 修正: magic_judge.start() を検証後すぐに呼び出し、レースコンディションを防ぐ
+    -- 修正2: magic_judge.start() が false を返す場合は他の魔法が進行中
+    if not magic_judge.start(spell.name, source_set) then
+        return false, "他魔法詠唱中"
+    end
     
     state.last_spell = spell.name
 
@@ -701,7 +705,16 @@ local function cast_spell_combatbuff(spell, target)
     end
 
     -- ②: combatbuff も magic_judge でモニタリング
-    magic_judge.start(spell.name, 'combatbuff')
+    -- 修正: magic_judge.start() を検証後すぐに呼び出し、レースコンディションを防ぐ
+    -- 修正2: magic_judge.start() が false を返す場合は他の魔法が進行中なので予約
+    if not magic_judge.start(spell.name, 'combatbuff') then
+        state.combatbuff.pending = true
+        state.combatbuff.pending_spell = spell
+        state.combatbuff.pending_target = target or '<me>'
+        state.combatbuff.pending_priority = 5
+        log_msg('notice', '【auto】', spell.name, '予約（他魔法詠唱中）')
+        return true
+    end
     
     send_cmd(('input /ma "%s" %s'):format(spell.name, target or '<me>'))
     return true
@@ -741,7 +754,15 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
         end
     end
 
+    -- Sleep2の初回処理（<stnpc>での対象選択）
     if is_sleep2 and target == '<stnpc>' then
+        -- 修正: Sleep2初回も magic_judge でトラッキング開始
+        -- Sleep2初回は実際に魔法を詠唱するため、トラッキングが必要
+        -- 修正2: ロックが取得できない場合は予約
+        if not magic_judge.start(name, "special") then
+            enqueue_special_spell(name, recast_id, target, is_sleep2, '理由: 他魔法詠唱中')
+            return
+        end
         send_cmd(('input /ma "%s" <stnpc>'):format(name))
         state.sleep2_initial = true
         state.sleep2_waiting_for_confirm = true
@@ -750,11 +771,15 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
         return
     end
 
+    -- 以下の検証は通常の魔法実行時のみ必要
     if state.retry.active and state.retry.kind == 'special' then
         return
     end
 
-    if is_any_spell_casting() then
+    -- 修正: レースコンディション完全対策
+    -- magic_judge.start() が mutex のように動作するようになった
+    -- 既に他の魔法が進行中の場合、false を返すので、その場合は予約する
+    if not magic_judge.start(name, "special") then
         enqueue_special_spell(name, recast_id, target, is_sleep2, '理由: 他魔法詠唱中')
         return
     end
@@ -813,8 +838,6 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
     state.queued_special.target = nil
     state.queued_special.is_sleep2 = false
     state.queued_special.priority = nil
-
-    magic_judge.start(name, "special")
 
     send_cmd(('input /ma "%s" %s'):format(name, target))
 end
@@ -1494,6 +1517,16 @@ local function try_start_mb1(spell_name, target, opts)
         end
     end
 
+    -- 修正: magic_judge.start() を検証後すぐに呼び出し、レースコンディションを防ぐ
+    -- 修正2: ロックが取得できない場合は予約
+    if not magic_judge.start(spell_name, 'mbset') then
+        state.mbset.pending_mb1 = true
+        state.mbset.mb1_spell = spell_name
+        state.mbset.mb1_target = target
+        log_msg('notice', '【MB】', spell_name, '予約（他魔法詠唱中）')
+        return true
+    end
+
     -- ①: MB セット開始時は WS/BUFFSET を中断
     if state.ws.active then
         --log_msg('report', '【WS】', 'WSセット', '中断', 'MBセット発動')
@@ -1516,9 +1549,6 @@ local function try_start_mb1(spell_name, target, opts)
     state.mbset.mb1_target = target
     state.mbset.mb1_start_time = now()
     state.mbset.pending_mb1 = false
-
-    -- ②: magic_judge でモニタリング開始
-    magic_judge.start(spell_name, 'mbset')
     
     send_cmd(('input /ma "%s" %s'):format(spell_name, target))
     log_msg('report', '【MB】', spell_name, 'MB1 詠唱開始')
@@ -1546,13 +1576,17 @@ local function try_start_mb2(spell_name, target)
         return false
     end
 
+    -- 修正: magic_judge.start() を検証後すぐに呼び出し、レースコンディションを防ぐ
+    -- 修正2: MB2はロックが取得できない場合は中止（MB2はタイミングが重要）
+    if not magic_judge.start(spell_name, 'mbset') then
+        log_msg('abort', '【MB】', spell_name, 'MB2 中止', '他魔法詠唱中')
+        return false
+    end
+
     state.last_spell = spell_name
 
     state.mbset.mb2_spell = spell_name
     state.mbset.mb2_target = target
-
-    -- ②: magic_judge でモニタリング開始
-    magic_judge.start(spell_name, 'mbset')
 
     send_cmd(('input /ma "%s" %s'):format(spell_name, target))
     log_msg('report', '【MB】', spell_name, 'MB2 詠唱開始')
