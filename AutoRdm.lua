@@ -945,6 +945,16 @@ local function process_buffs()
     if state.buffset.active then return end
     if state.suspend_buffs then return end
 
+    -- ③: 優先度チェック - MB進行中は実行しない
+    if state.mbset and (state.mbset.active or state.mbset.pending_mb1 or state.mbset.mb1_spell or state.mbset.mb2_spell) then
+        return
+    end
+
+    -- ③: 優先度チェック - WS進行中は実行しない
+    if state.ws.active then
+        return
+    end
+
     -- ⑥e: 戦闘バフは独自のインターバル 6秒をとる
     if state.combatbuff.last_finish_time > 0 and now() - state.combatbuff.last_finish_time < DELAY_CONFIG.combatbuff_interval then
         return
@@ -1095,6 +1105,18 @@ local function start_buffset()
         return
     end
 
+    -- ③: 優先度チェック - スペシャル魔法進行中は開始しない
+    if state.current_special.name then
+        log_msg('abort', '【buff】', '強化セット', '中断', 'スペシャル魔法進行中')
+        return
+    end
+
+    -- ③: 優先度チェック - MB進行中は開始しない
+    if state.mbset and (state.mbset.active or state.mbset.pending_mb1 or state.mbset.mb1_spell or state.mbset.mb2_spell) then
+        log_msg('abort', '【buff】', '強化セット', '中断', 'MBセット進行中')
+        return
+    end
+
     if state.ws.active then
         log_msg('abort', '【buff】', '強化セット', '中断', 'WSセット発動中')
         return
@@ -1112,6 +1134,11 @@ end
 local function process_buffset()
     if not state.buffset.active then return end
     if state.current_special.name then return end
+
+    -- ③: 優先度チェック - MB進行中は待機
+    if state.mbset and (state.mbset.active or state.mbset.pending_mb1 or state.mbset.mb1_spell or state.mbset.mb2_spell) then
+        return
+    end
 
     if has_action_blocking_debuff() then
         log_msg('abort', '【buff】', '強化セット', '中断', '行動不能デバフ')
@@ -1274,6 +1301,15 @@ local function process_ws()
     if w.queued_mode and not w.active then
         local ok, reason = can_start_special()
         if ok then
+            -- ③: 優先度チェック - MB進行中はWS開始を待機
+            if state.mbset and (state.mbset.active or state.mbset.pending_mb1 or state.mbset.mb1_spell or state.mbset.mb2_spell) then
+                if not w.logged_reservation then
+                    log_msg('notice', '【WS】', w.queued_mode, 'MB完了待ち')
+                    w.logged_reservation = true
+                end
+                return
+            end
+
             reset_ws_for_new_set(w.queued_mode)
             log_msg('start', '【WS】', w.queued_mode, 'WSセット', '開始')
             w.logged_reservation = false
@@ -1290,6 +1326,11 @@ local function process_ws()
 
     if not w.active then return end
     if state.current_special.name then return end
+
+    -- ③: 優先度チェック - MB進行中はWS実行を待機
+    if state.mbset and (state.mbset.active or state.mbset.pending_mb1 or state.mbset.mb1_spell or state.mbset.mb2_spell) then
+        return
+    end
 
     local ok, reason = can_start_special()
     if not ok then
