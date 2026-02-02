@@ -418,6 +418,7 @@ local state = {
     sleep2_waiting_for_confirm = false,
     sleep2_name = nil,
     sleep2_recast_id = nil,
+    sleep2_initial_start_time = 0,
 
     -- 新規: プレイヤーの前回 status（戦闘状態の遷移検出用）
     last_player_status = nil,
@@ -742,16 +743,28 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
     end
 
     if is_sleep2 and target == '<stnpc>' then
+        -- ①: Sleep2 initial cast should also go through magic_judge with timeout
+        magic_judge.start(name, "special")
         send_cmd(('input /ma "%s" <stnpc>'):format(name))
         state.sleep2_initial = true
         state.sleep2_waiting_for_confirm = true
         state.sleep2_name = name
         state.sleep2_recast_id = recast_id
+        state.sleep2_initial_start_time = now()
         return
     end
 
     if state.retry.active and state.retry.kind == 'special' then
-        return
+        -- ③: 優先度チェック - リトライより高優先度なら実行を許可
+        local new_priority = SPECIAL_PRIORITY[name] or 999
+        local retry_priority = state.retry.priority or 999
+        if new_priority >= retry_priority then
+            -- 新規魔法の優先度が低い（数値が大きい）場合はリトライを優先
+            return
+        end
+        -- 新規魔法の優先度が高い場合はリトライを中断して実行
+        log_msg('abort', '【SP】', state.retry.spell_name or 'リトライ', '中断', '高優先度魔法により中断')
+        reset_retry()
     end
 
     if is_any_spell_casting() then
@@ -837,8 +850,22 @@ windower.register_event('keyboard', function(dik, down)
 
         state.sleep2_name = nil
         state.sleep2_recast_id = nil
+        state.sleep2_initial_start_time = 0
 
-        start_special_spell(name, recast_id, '<lastst>', true, false)
+        -- ①: Sleep2 初回の成否判定をチェック
+        local r = nil
+        if magic_judge and magic_judge.consume_result_for then
+            r = magic_judge.consume_result_for("special")
+        end
+
+        if r == "fail" then
+            -- 初回が失敗していたら、再試行をキューに追加
+            log_msg('report', '【SP】', name, 'Enter確認後失敗検知', 'キューに追加')
+            enqueue_special_spell(name, recast_id, '<lastst>', true, '理由: 初回失敗')
+        else
+            -- 成功または判定なしの場合は通常通り実行
+            start_special_spell(name, recast_id, '<lastst>', true, false)
+        end
         return
     end
 
@@ -847,6 +874,11 @@ windower.register_event('keyboard', function(dik, down)
         state.sleep2_initial = false
         state.sleep2_name = nil
         state.sleep2_recast_id = nil
+        state.sleep2_initial_start_time = 0
+        -- ①: Esc キャンセル時も magic_judge を停止
+        if magic_judge and magic_judge.state then
+            magic_judge.state.active = false
+        end
         return
     end
 end)
@@ -2236,6 +2268,18 @@ windower.register_event('prerender', function()
         end
     end
 
+    -- ①: Sleep2 初回待機のタイムアウト（8秒）
+    if state.sleep2_waiting_for_confirm and state.sleep2_initial_start_time > 0 
+       and t - state.sleep2_initial_start_time > 8 then
+        log_msg('abort', '【safety】', state.sleep2_name or 'Sleep2', '中断', 'Enter待機タイムアウト')
+        state.sleep2_initial = false
+        state.sleep2_waiting_for_confirm = false
+        state.sleep2_name = nil
+        state.sleep2_recast_id = nil
+        state.sleep2_initial_start_time = 0
+        magic_judge.state.active = false
+    end
+
     -- スペシャル魔法予約実行
     if state.queued_special.name and not state.current_special.name then
         local ok, reason = can_start_special()
@@ -2526,6 +2570,7 @@ function reset_all_states()
     state.sleep2_waiting_for_confirm = false
     state.sleep2_name = nil
     state.sleep2_recast_id = nil
+    state.sleep2_initial_start_time = 0
 
     -- ②: casting flags を廃止
     state.last_spell = nil
