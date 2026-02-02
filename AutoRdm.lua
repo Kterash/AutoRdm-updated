@@ -5,7 +5,7 @@
 
 _addon.name     = 'AutoRdm'
 _addon.author   = 'Kazuhiro+Copilot'
-_addon.version  = '5.34'
+_addon.version  = '5.35'
 _addon.commands = {'ardm'}
 
 ------------------------------------------------------------
@@ -34,14 +34,137 @@ local JOB_BLM = 4
 -- These IDs confirm actual skillchain occurrence in action packets
 ------------------------------------------------------------
 local SC_SKILLCHAIN_IDS = {
-    [288] = true,  -- Fragmentation
-    [289] = true,  -- Distortion
-    [290] = true,  -- Fusion
-    [291] = true,  -- Gravitation
-    [385] = true,  -- Light
-    [386] = true,  -- Darkness
+    -- Level 2/3 Skillchains (damage)
+    [288] = true,  -- Light
+    [289] = true,  -- Darkness
+    [290] = true,  -- Gravitation
+    [291] = true,  -- Fragmentation
     [767] = true,  -- Radiance
     [768] = true,  -- Umbra
+    
+    -- Level 1 Skillchains (damage)
+    [292] = true,  -- Distortion
+    [293] = true,  -- Fusion
+    [294] = true,  -- Compression
+    [295] = true,  -- Liquefaction
+    [296] = true,  -- Induration
+    [297] = true,  -- Reverberation
+    [298] = true,  -- Transfixion
+    [299] = true,  -- Scission
+    [300] = true,  -- Detonation
+    [301] = true,  -- Impaction
+    [302] = true,  -- Cosmic Elucidation
+    
+    -- Level 2/3 Skillchains (healing)
+    [385] = true,  -- Light
+    [386] = true,  -- Darkness
+    
+    -- Level 1 Skillchains (healing)
+    [387] = true,  -- Gravitation
+    [388] = true,  -- Fragmentation
+    [389] = true,  -- Distortion
+    [390] = true,  -- Fusion
+    [391] = true,  -- Compression
+    [392] = true,  -- Liquefaction
+    [393] = true,  -- Induration
+    [394] = true,  -- Reverberation
+    [395] = true,  -- Transfixion
+    [396] = true,  -- Scission
+    [397] = true,  -- Detonation
+    [398] = true,  -- Impaction
+    
+    -- Other skillchain variants
+    [732] = true,  -- Universal Enlightenment
+    [769] = true,  -- Radiance (healing)
+    [770] = true,  -- Umbra (healing)
+}
+
+------------------------------------------------------------
+-- Skillchain Message ID to Name mapping (for action messages 0x29)
+------------------------------------------------------------
+local SC_MESSAGE_ID_TO_NAME = {
+    -- Level 2/3 Skillchains
+    [288] = 'Light',
+    [289] = 'Darkness',
+    [290] = 'Gravitation',
+    [291] = 'Fragmentation',
+    [767] = 'Radiance',
+    [768] = 'Umbra',
+    -- Level 1 Skillchains
+    [292] = 'Distortion',
+    [293] = 'Fusion',
+    [294] = 'Compression',
+    [295] = 'Liquefaction',
+    [296] = 'Induration',
+    [297] = 'Reverberation',
+    [298] = 'Transfixion',
+    [299] = 'Scission',
+    [300] = 'Detonation',
+    [301] = 'Impaction',
+    [302] = 'Cosmic Elucidation',
+    -- Healing variants use same names
+    [385] = 'Light',
+    [386] = 'Darkness',
+    [387] = 'Gravitation',
+    [388] = 'Fragmentation',
+    [389] = 'Distortion',
+    [390] = 'Fusion',
+    [391] = 'Compression',
+    [392] = 'Liquefaction',
+    [393] = 'Induration',
+    [394] = 'Reverberation',
+    [395] = 'Transfixion',
+    [396] = 'Scission',
+    [397] = 'Detonation',
+    [398] = 'Impaction',
+    -- Other variants
+    [732] = 'Universal Enlightenment',
+    [769] = 'Radiance',
+    [770] = 'Umbra',
+}
+
+------------------------------------------------------------
+-- Skillchain name to Japanese mapping (for MB magic determination)
+------------------------------------------------------------
+local SC_EN_TO_JA = {
+    Light         = "光",
+    Darkness      = "闇",
+    Fusion        = "核熱",
+    Fragmentation = "分解",
+    Distortion    = "湾曲",
+    Gravitation   = "重力",
+    Liquefaction  = "溶解",
+    Induration    = "硬化",
+    Detonation    = "炸裂",
+    Impaction     = "衝撃",
+    Scission      = "切断",
+    Reverberation = "振動",
+    Compression   = "圧縮",
+    Transfixion   = "貫通",
+    Radiance      = "光",  -- Radiance uses Light element
+    Umbra         = "闇",  -- Umbra uses Darkness element
+    -- Universal Enlightenment and Cosmic Elucidation are rare/special
+    -- They'll fall back to default if not explicitly mapped
+}
+
+------------------------------------------------------------
+-- MB Magic mapping (Japanese skillchain name to spells)
+------------------------------------------------------------
+local MB_MAP = {
+    ["光"]   = {mb3="サンダーIII", mb2="サンダーII"},
+    ["闇"]   = {mb3="ブリザドIII", mb2="ブリザドII"},
+    ["湾曲"] = {mb3="ブリザドIII", mb2="ブリザドII"},
+    ["分解"] = {mb3="サンダーIII", mb2="サンダーII"},
+    ["核熱"] = {mb3="ファイアIII", mb2="ファイアII"},
+    ["重力"] = {mb3="ストーンIII", mb2="ストーンII"},
+    ["溶解"] = {mb3="ファイアIII",  mb2="ファイアII"},
+    ["硬化"] = {mb3="ブリザドIII",  mb2="ブリザドII"},
+    ["炸裂"] = {mb3="エアロIII",    mb2="エアロII"},
+    ["衝撃"] = {mb3="サンダーIII",  mb2="サンダーII"},
+    ["切断"] = {mb3="ストーンIII",  mb2="ストーンII"},
+    ["振動"] = {mb3="ウォータIII",  mb2="ウォータII"},
+    ["圧縮"] = {mb3="ブリザドIII",  mb2="ブリザドII"},
+    ["貫通"] = {mb3="サンダーIII",  mb2="サンダーII"},
 }
 
 ------------------------------------------------------------
@@ -1488,63 +1611,15 @@ local function process_analyzed_ws(result, act)
 
     local m = state.mbset
 
-    -- Skillchain detection from WS_Detector
-    -- WS_Detector analyzes the action packet (0x028) and detects skillchains either:
-    -- 1. From add_effect_message (packet-based, Level 2/3 SCs)
-    -- 2. From WS property calculation (when ws1_props available, Level 1 SCs)
-    -- 
-    -- MB set should only trigger when add_effect_message confirms actual skillchain
-    -- Using SC_SKILLCHAIN_IDS table to validate packet-based skillchain confirmation
-    -- Note: add_effect_msg defaults to 0 when not present; SC_SKILLCHAIN_IDS[0] is nil, 
-    -- so the check correctly fails when no skillchain message is present
-    local add_effect_msg = result.add_effect_message or 0
-    local sc_confirmed_by_packet = SC_SKILLCHAIN_IDS[add_effect_msg]
-    
-    if sc_confirmed_by_packet then
-        -- Check if there's an active MB set to terminate
-        local was_active = m.active or m.mb1_spell or m.mb2_spell or m.pending_mb1
-        if was_active then
-            reset_mbset('新しい連携を検知; MBセットをリセット')
-        end
-        
-        -- Start new MB set with detected skillchain
-        local mb1 = result.mb1 or "サンダーII"
-        local mb2 = result.mb2 or "サンダー"
-
-        m.active = true
-        m.mb1_spell = mb1
-        m.mb2_spell = mb2
-        m.mb1_target = '<t>'
-        m.mb2_target = '<t>'
-        m.pending_mb1 = true
-        m.last_detected_sc = result.sc_en
-        m.mb2_time = 0
-        
-        -- Track last WS properties for next skillchain calculation
-        m.last_props = result.props
-
-        -- MBセット開始ログ
-        -- At this point, add_effect_msg is guaranteed to be a valid skillchain ID
-        -- because we're inside the sc_confirmed_by_packet check
-        log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (packet:msg=%d)', mb1, mb2, result.sc_en, add_effect_msg))
-
-        -- Try to start MB1 immediately if possible
-        if not state.current_special.name then
-            local ok, reason = can_start_special()
-            if ok then
-                try_start_mb1(m.mb1_spell, m.mb1_target)
-            else
-                log_msg('notice', '【MB】', m.mb1_spell, '予約')
-            end
-        else
-            -- ①: スペシャル魔法中に連携検知した場合、reserved_during_special フラグを設定
-            m.reserved_during_special = true
-            log_msg('notice', '【MB】', m.mb1_spell, 'スペシャル魔法中に予約')
-        end
-        return
-    end
-
-    -- No skillchain detected - update last_props for potential next SC
+    -- Skillchain detection has been moved to incoming chunk handler (0x29 Action Message)
+    -- The user requested to trigger MB set based on action messages, not action packet add_effect_message
+    -- This ensures MB set only triggers when skillchains actually occur (confirmed by game messages)
+    --
+    -- OLD CODE (disabled):
+    -- Used to check result.add_effect_message from action packet and start MB set
+    -- Now we rely on incoming chunk 0x29 handler for skillchain detection
+    --
+    -- Still track last_props for WS property calculation (used by WS sets)
     if result.props then
         m.last_props = result.props
     end
@@ -1965,6 +2040,89 @@ local function handle_spell_finish(act)
 end
 
 windower.register_event('action', handle_spell_finish)
+
+------------------------------------------------------------
+-- incoming chunk: Action Message (0x29) handler for skillchain detection
+-- This detects skillchains from action message packets and triggers MB set
+------------------------------------------------------------
+windower.register_event('incoming chunk', function(id, data)
+    -- Only process Action Message packets (0x29)
+    if id ~= 0x29 then return end
+    
+    -- Check if enabled and is RDM
+    if not state.enabled then return end
+    local p = get_player()
+    if not p or p.main_job_id ~= JOB_RDM then return end
+    
+    -- Check if in combat
+    if p.status ~= 1 then return end
+    
+    -- Check if we have a target
+    local my_target = windower.ffxi.get_mob_by_target('t')
+    if not my_target then return end
+    
+    -- Parse the packet
+    local pkt = packets.parse('incoming', data)
+    if not pkt then return end
+    
+    -- Get message ID
+    local msg_id = pkt['Message ID']
+    if not msg_id then return end
+    
+    -- Check if this is a skillchain message
+    if not SC_SKILLCHAIN_IDS[msg_id] then return end
+    
+    -- Get skillchain name from message ID
+    local sc_en = SC_MESSAGE_ID_TO_NAME[msg_id]
+    if not sc_en then return end
+    
+    -- Determine MB magic based on skillchain using module-level tables
+    local sc_ja = SC_EN_TO_JA[sc_en]
+    local mb1, mb2
+    if sc_ja and MB_MAP[sc_ja] then
+        mb1 = MB_MAP[sc_ja].mb3
+        mb2 = MB_MAP[sc_ja].mb2
+    else
+        mb1 = "サンダーII"
+        mb2 = "サンダー"
+    end
+    
+    -- Get mbset state
+    local m = state.mbset
+    
+    -- Check if there's an active MB set to terminate
+    local was_active = m.active or m.mb1_spell or m.mb2_spell or m.pending_mb1
+    if was_active then
+        reset_mbset('新しい連携を検知; MBセットをリセット')
+    end
+    
+    -- Start new MB set with detected skillchain
+    m.active = true
+    m.mb1_spell = mb1
+    m.mb2_spell = mb2
+    m.mb1_target = '<t>'
+    m.mb2_target = '<t>'
+    m.pending_mb1 = true
+    m.last_detected_sc = sc_en
+    m.mb2_time = 0
+    
+    -- Log MB set start
+    log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (message:msg=%d)', mb1, mb2, sc_en, msg_id))
+    
+    -- Try to start MB1 immediately if possible
+    if not state.current_special.name then
+        local ok, reason = can_start_special()
+        if ok then
+            try_start_mb1(m.mb1_spell, m.mb1_target)
+        else
+            log_msg('notice', '【MB】', m.mb1_spell, '予約')
+        end
+    else
+        -- If casting special magic, reserve the MB
+        m.reserved_during_special = true
+        log_msg('notice', '【MB】', m.mb1_spell, 'スペシャル魔法中に予約')
+    end
+end)
 
 ------------------------------------------------------------
 -- 戦闘終了一元処理（重複ログ抑止）
