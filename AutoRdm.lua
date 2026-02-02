@@ -2072,6 +2072,13 @@ windower.register_event('incoming chunk', function(id, data)
     -- Check if this is a skillchain message
     if not SC_SKILLCHAIN_IDS[msg_id] then return end
     
+    -- Check if the skillchain target matches the player's current target
+    local pkt_target = pkt['Target']
+    if pkt_target and pkt_target ~= my_target.id then
+        -- Skillchain is not on our target, ignore it
+        return
+    end
+    
     -- Get skillchain name from message ID
     local sc_en = SC_MESSAGE_ID_TO_NAME[msg_id]
     if not sc_en then return end
