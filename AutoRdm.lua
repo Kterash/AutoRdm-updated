@@ -5,7 +5,7 @@
 
 _addon.name     = 'AutoRdm'
 _addon.author   = 'Kazuhiro+Copilot'
-_addon.version  = '5.35'
+_addon.version  = '5.36'
 _addon.commands = {'ardm'}
 
 ------------------------------------------------------------
@@ -1611,17 +1611,52 @@ local function process_analyzed_ws(result, act)
 
     local m = state.mbset
 
-    -- Skillchain detection has been moved to incoming chunk handler (0x29 Action Message)
-    -- The user requested to trigger MB set based on action messages, not action packet add_effect_message
-    -- This ensures MB set only triggers when skillchains actually occur (confirmed by game messages)
-    --
-    -- OLD CODE (disabled):
-    -- Used to check result.add_effect_message from action packet and start MB set
-    -- Now we rely on incoming chunk 0x29 handler for skillchain detection
-    --
-    -- Still track last_props for WS property calculation (used by WS sets)
+    -- Track last_props for WS property calculation (used by WS sets)
     if result.props then
         m.last_props = result.props
+    end
+    
+    -- Detect skillchain from add_effect_message in action packet
+    -- This is the reliable way to detect actual skillchains
+    local add_msg = result.add_effect_message or 0
+    if SC_SKILLCHAIN_IDS[add_msg] then
+        -- Actual skillchain detected on our target
+        local sc_en = result.sc_en or SC_MESSAGE_ID_TO_NAME[add_msg]
+        local mb1 = result.mb1 or "サンダーII"
+        local mb2 = result.mb2 or "サンダー"
+        
+        -- Check if there's an active MB set to terminate
+        local was_active = m.active or m.mb1_spell or m.mb2_spell or m.pending_mb1
+        if was_active then
+            reset_mbset('新しい連携を検知; MBセットをリセット')
+        end
+        
+        -- Start new MB set with detected skillchain
+        m.active = true
+        m.mb1_spell = mb1
+        m.mb2_spell = mb2
+        m.mb1_target = '<t>'
+        m.mb2_target = '<t>'
+        m.pending_mb1 = true
+        m.last_detected_sc = sc_en
+        m.mb2_time = 0
+        
+        -- Log MB set start
+        log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (add_msg=%d)', mb1, mb2, sc_en or 'unknown', add_msg))
+        
+        -- Try to start MB1 immediately if possible
+        if not state.current_special.name then
+            local ok, reason = can_start_special()
+            if ok then
+                try_start_mb1(m.mb1_spell, m.mb1_target)
+            else
+                log_msg('notice', '【MB】', m.mb1_spell, '予約')
+            end
+        else
+            -- If casting special magic, reserve the MB
+            m.reserved_during_special = true
+            log_msg('notice', '【MB】', m.mb1_spell, 'スペシャル魔法中に予約')
+        end
     end
 end
 
@@ -2043,8 +2078,10 @@ windower.register_event('action', handle_spell_finish)
 
 ------------------------------------------------------------
 -- incoming chunk: Action Message (0x29) handler for skillchain detection
--- This detects skillchains from action message packets and triggers MB set
+-- DISABLED: This approach was unreliable because 0x29 packets don't have proper target info
+-- We now use action packet add_effect_message instead (see process_analyzed_ws)
 ------------------------------------------------------------
+--[[
 windower.register_event('incoming chunk', function(id, data)
     -- Only process Action Message packets (0x29)
     if id ~= 0x29 then return end
@@ -2071,6 +2108,13 @@ windower.register_event('incoming chunk', function(id, data)
     
     -- Check if this is a skillchain message
     if not SC_SKILLCHAIN_IDS[msg_id] then return end
+    
+    -- Check if the skillchain target matches the player's current target
+    local pkt_target = pkt['Target']
+    if pkt_target and pkt_target ~= my_target.id then
+        -- Skillchain is not on our target, ignore it
+        return
+    end
     
     -- Get skillchain name from message ID
     local sc_en = SC_MESSAGE_ID_TO_NAME[msg_id]
@@ -2123,6 +2167,8 @@ windower.register_event('incoming chunk', function(id, data)
         log_msg('notice', '【MB】', m.mb1_spell, 'スペシャル魔法中に予約')
     end
 end)
+--]]
+
 
 ------------------------------------------------------------
 -- 戦闘終了一元処理（重複ログ抑止）

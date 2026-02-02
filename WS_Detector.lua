@@ -499,6 +499,7 @@ function WS_Detector.parse(act, ws1_props, mode, cfg, hit_flag, expected_sc_en)
         actor_type = actor_type,
         success    = final_success,
         reason     = reason,
+        add_effect_message = analyzed.add_effect_message or 0,
     }
 end
 
