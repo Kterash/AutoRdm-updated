@@ -108,6 +108,11 @@ magic_judge.state = state
 -- 監視開始
 ------------------------------------------------------------
 function magic_judge.start(spell_name, source_set)
+    -- 修正: 既に監視中の場合は失敗を返す（レースコンディション対策）
+    if state.active then
+        return false
+    end
+    
     state.active      = true
     state.spell_name  = spell_name
     state.source_set  = source_set
@@ -120,6 +125,8 @@ function magic_judge.start(spell_name, source_set)
     state.mp_before = p and p.vitals.mp or 0
     state.mp_after  = state.mp_before
     state.mp_decreased = false
+    
+    return true
 end
 
 ------------------------------------------------------------
