@@ -299,6 +299,7 @@ state.mbset = {
     mb2_time = 0,
     mb2_release_time = 0,
     last_detected_sc = nil,
+    last_props = nil, -- Last WS properties for skillchain calculation
     awaiting_mb2 = false,
     reserved_during_special = false, -- ①: スペシャル魔法中に連携検知した場合の予約フラグ
 }
@@ -1304,7 +1305,7 @@ reset_mbset = function(reason)
         log_msg('finish', '【MB】', 'MBセット', '完了')
     end
 
-    -- Reset MB-related state (WS tracking removed - no longer needed)
+    -- Reset MB-related state (last_props kept for next SC calculation)
     m.active = false
     m.pending_mb1 = false
     m.mb1_spell = nil
@@ -1472,17 +1473,13 @@ local function process_analyzed_ws(result, act)
 
     local m = state.mbset
 
-    -- Skillchain message IDs that indicate a REAL skillchain occurred (from incoming chunk 0x028)
-    local SC_SKILLCHAIN_IDS = {
-        [288] = true, [289] = true, [290] = true, [291] = true,
-        [385] = true, [386] = true, [767] = true, [768] = true,
-    }
+    -- Skillchain detection from WS_Detector
+    -- WS_Detector analyzes the action packet (0x028) and detects skillchains either:
+    -- 1. From add_effect_message (packet-based, Level 2/3 SCs)
+    -- 2. From WS property calculation (when ws1_props available, Level 1 SCs)
+    local sc_detected = (result.sc_en ~= nil)
     
-    -- Only start MB set if add_effect_message indicates a REAL skillchain
-    local add_effect_msg = result.add_effect_message or 0
-    local real_skillchain = SC_SKILLCHAIN_IDS[add_effect_msg]
-    
-    if real_skillchain and result.sc_en then
+    if sc_detected then
         -- Check if there's an active MB set to terminate
         local was_active = m.active or m.mb1_spell or m.mb2_spell or m.pending_mb1
         if was_active then
@@ -1501,9 +1498,17 @@ local function process_analyzed_ws(result, act)
         m.pending_mb1 = true
         m.last_detected_sc = result.sc_en
         m.mb2_time = 0
+        
+        -- Track last WS properties for next skillchain calculation
+        m.last_props = result.props
 
-        -- MBセット開始ログ（簡潔版：0x028 メッセージから検知）
-        log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (0x028:msg=%d)', mb1, mb2, result.sc_en, add_effect_msg))
+        -- MBセット開始ログ
+        local add_effect_msg = result.add_effect_message or 0
+        if add_effect_msg > 0 then
+            log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (packet:msg=%d)', mb1, mb2, result.sc_en, add_effect_msg))
+        else
+            log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (calculated)', mb1, mb2, result.sc_en))
+        end
 
         -- Try to start MB1 immediately if possible
         if not state.current_special.name then
@@ -1521,8 +1526,10 @@ local function process_analyzed_ws(result, act)
         return
     end
 
-    -- No real skillchain detected - do not start MB set
-    -- (Remove all WS count tracking and timing logic as it's no longer needed)
+    -- No skillchain detected - update last_props for potential next SC
+    if result.props then
+        m.last_props = result.props
+    end
 end
 
 ------------------------------------------------------------
@@ -1667,7 +1674,7 @@ windower.register_event('action', function(act)
                 -- ignore Mix: Dark Potion (id 4260)
                 if not (act.param and act.param == 4260) then
                     if is_friendly_actor(act.actor_id) then
-                        local parsed = detect_with_wsdetector(act, nil, nil, nil, false)
+                        local parsed = detect_with_wsdetector(act, state.mbset.last_props, nil, nil, false)
                         if parsed then
                             process_analyzed_ws(parsed, act)
                         end
