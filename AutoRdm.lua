@@ -861,7 +861,7 @@ windower.register_event('keyboard', function(dik, down)
         state.sleep2_initial_start_time = 0
 
         -- ①: Sleep2 初回の成否判定をチェック
-        local magic_result = nil
+        local magic_result
         if magic_judge and magic_judge.consume_result_for then
             magic_result = magic_judge.consume_result_for("special")
         end
@@ -2340,7 +2340,9 @@ windower.register_event('prerender', function()
         state.sleep2_name = nil
         state.sleep2_recast_id = nil
         state.sleep2_initial_start_time = 0
-        magic_judge.state.active = false
+        if magic_judge and magic_judge.state then
+            magic_judge.state.active = false
+        end
     end
 
     -- スペシャル魔法予約実行
