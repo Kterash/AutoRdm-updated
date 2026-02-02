@@ -743,8 +743,10 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
         end
     end
 
+    -- Sleep2の初回処理（<stnpc>での対象選択）
     if is_sleep2 and target == '<stnpc>' then
         -- 修正: Sleep2初回も magic_judge でトラッキング開始
+        -- Sleep2初回は実際に魔法を詠唱するため、トラッキングが必要
         magic_judge.start(name, "special")
         send_cmd(('input /ma "%s" <stnpc>'):format(name))
         state.sleep2_initial = true
@@ -754,6 +756,7 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
         return
     end
 
+    -- 以下の検証は通常の魔法実行時のみ必要
     if state.retry.active and state.retry.kind == 'special' then
         return
     end
@@ -763,7 +766,7 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
         return
     end
 
-    -- 修正: magic_judge.start() を検証後すぐに呼び出し、レースコンディションを防ぐ
+    -- 修正: 全ての検証が完了した後、magic_judge.start() を呼び出し、レースコンディションを防ぐ
     -- これにより、後続の処理中に別の魔法がcan_start_special()をパスすることを防ぐ
     magic_judge.start(name, "special")
 
