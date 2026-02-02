@@ -1477,9 +1477,16 @@ local function process_analyzed_ws(result, act)
     -- WS_Detector analyzes the action packet (0x028) and detects skillchains either:
     -- 1. From add_effect_message (packet-based, Level 2/3 SCs)
     -- 2. From WS property calculation (when ws1_props available, Level 1 SCs)
-    local sc_detected = (result.sc_en ~= nil)
+    -- 
+    -- MB set should only trigger when add_effect_message confirms actual skillchain
+    -- The skillchain IDs in add_effect_message are: 288, 289, 290, 291, 385, 386, 767, 768
+    local add_effect_msg = result.add_effect_message or 0
+    local sc_confirmed_by_packet = (add_effect_msg == 288 or add_effect_msg == 289 or 
+                                    add_effect_msg == 290 or add_effect_msg == 291 or 
+                                    add_effect_msg == 385 or add_effect_msg == 386 or 
+                                    add_effect_msg == 767 or add_effect_msg == 768)
     
-    if sc_detected then
+    if sc_confirmed_by_packet then
         -- Check if there's an active MB set to terminate
         local was_active = m.active or m.mb1_spell or m.mb2_spell or m.pending_mb1
         if was_active then
@@ -1502,13 +1509,8 @@ local function process_analyzed_ws(result, act)
         -- Track last WS properties for next skillchain calculation
         m.last_props = result.props
 
-        -- MBセット開始ログ
-        local add_effect_msg = result.add_effect_message or 0
-        if add_effect_msg > 0 then
-            log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (packet:msg=%d)', mb1, mb2, result.sc_en, add_effect_msg))
-        else
-            log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (calculated)', mb1, mb2, result.sc_en))
-        end
+        -- MBセット開始ログ (add_effect_msg already defined above)
+        log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (packet:msg=%d)', mb1, mb2, result.sc_en, add_effect_msg))
 
         -- Try to start MB1 immediately if possible
         if not state.current_special.name then
