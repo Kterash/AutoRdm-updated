@@ -124,6 +124,50 @@ local SC_MESSAGE_ID_TO_NAME = {
 }
 
 ------------------------------------------------------------
+-- Skillchain name to Japanese mapping (for MB magic determination)
+------------------------------------------------------------
+local SC_EN_TO_JA = {
+    Light         = "光",
+    Darkness      = "闇",
+    Fusion        = "核熱",
+    Fragmentation = "分解",
+    Distortion    = "湾曲",
+    Gravitation   = "重力",
+    Liquefaction  = "溶解",
+    Induration    = "硬化",
+    Detonation    = "炸裂",
+    Impaction     = "衝撃",
+    Scission      = "切断",
+    Reverberation = "振動",
+    Compression   = "圧縮",
+    Transfixion   = "貫通",
+    Radiance      = "光",  -- Radiance uses Light element
+    Umbra         = "闇",  -- Umbra uses Darkness element
+    -- Universal Enlightenment and Cosmic Elucidation are rare/special
+    -- They'll fall back to default if not explicitly mapped
+}
+
+------------------------------------------------------------
+-- MB Magic mapping (Japanese skillchain name to spells)
+------------------------------------------------------------
+local MB_MAP = {
+    ["光"]   = {mb3="サンダーIII", mb2="サンダーII"},
+    ["闇"]   = {mb3="ブリザドIII", mb2="ブリザドII"},
+    ["湾曲"] = {mb3="ブリザドIII", mb2="ブリザドII"},
+    ["分解"] = {mb3="サンダーIII", mb2="サンダーII"},
+    ["核熱"] = {mb3="ファイアIII", mb2="ファイアII"},
+    ["重力"] = {mb3="ストーンIII", mb2="ストーンII"},
+    ["溶解"] = {mb3="ファイアIII",  mb2="ファイアII"},
+    ["硬化"] = {mb3="ブリザドIII",  mb2="ブリザドII"},
+    ["炸裂"] = {mb3="エアロIII",    mb2="エアロII"},
+    ["衝撃"] = {mb3="サンダーIII",  mb2="サンダーII"},
+    ["切断"] = {mb3="ストーンIII",  mb2="ストーンII"},
+    ["振動"] = {mb3="ウォータIII",  mb2="ウォータII"},
+    ["圧縮"] = {mb3="ブリザドIII",  mb2="ブリザドII"},
+    ["貫通"] = {mb3="サンダーIII",  mb2="サンダーII"},
+}
+
+------------------------------------------------------------
 -- spells（必要最小限の魔法定義）
 ------------------------------------------------------------
 local spells = {
@@ -2034,42 +2078,7 @@ windower.register_event('incoming chunk', function(id, data)
     local sc_en = SC_MESSAGE_ID_TO_NAME[msg_id]
     if not sc_en then return end
     
-    -- Determine MB magic based on skillchain
-    -- Replicate WS_Detector's MB determination logic
-    local SC_EN_TO_JA = {
-        Light         = "光",
-        Darkness      = "闇",
-        Fusion        = "核熱",
-        Fragmentation = "分解",
-        Distortion    = "湾曲",
-        Gravitation   = "重力",
-        Liquefaction  = "溶解",
-        Induration    = "硬化",
-        Detonation    = "炸裂",
-        Impaction     = "衝撃",
-        Scission      = "切断",
-        Reverberation = "振動",
-        Compression   = "圧縮",
-        Transfixion   = "貫通",
-    }
-    
-    local MB_MAP = {
-        ["光"]   = {mb3="サンダーIII", mb2="サンダーII"},
-        ["闇"]   = {mb3="ブリザドIII", mb2="ブリザドII"},
-        ["湾曲"] = {mb3="ブリザドIII", mb2="ブリザドII"},
-        ["分解"] = {mb3="サンダーIII", mb2="サンダーII"},
-        ["核熱"] = {mb3="ファイアIII", mb2="ファイアII"},
-        ["重力"] = {mb3="ストーンIII", mb2="ストーンII"},
-        ["溶解"] = {mb3="ファイアIII",  mb2="ファイアII"},
-        ["硬化"] = {mb3="ブリザドIII",  mb2="ブリザドII"},
-        ["炸裂"] = {mb3="エアロIII",    mb2="エアロII"},
-        ["衝撃"] = {mb3="サンダーIII",  mb2="サンダーII"},
-        ["切断"] = {mb3="ストーンIII",  mb2="ストーンII"},
-        ["振動"] = {mb3="ウォータIII",  mb2="ウォータII"},
-        ["圧縮"] = {mb3="ブリザドIii",  mb2="ブリザドII"},
-        ["貫通"] = {mb3="サンダーIII",  mb2="サンダーII"},
-    }
-    
+    -- Determine MB magic based on skillchain using module-level tables
     local sc_ja = SC_EN_TO_JA[sc_en]
     local mb1, mb2
     if sc_ja and MB_MAP[sc_ja] then
