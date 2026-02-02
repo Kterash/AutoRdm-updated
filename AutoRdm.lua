@@ -1586,12 +1586,13 @@ local function process_mbset_in_prerender(t)
             -- 実行可能になった場合のみMB2を実行
             if m.mb2_spell then
                 local success = try_start_mb2(m.mb2_spell, m.mb2_target)
-                if success then
-                    m.mb2_time = 0
-                    m.pending_mb1 = false
-                end
+                -- 成功・失敗に関わらず状態をクリア
+                m.mb2_time = 0
+                m.mb2_release_time = 0
+                m.pending_mb1 = false
             else
                 m.mb2_time = 0
+                m.mb2_release_time = 0
                 m.pending_mb1 = false
             end
         else
