@@ -655,6 +655,10 @@ local function cast_spell(spell, target, opts)
         return false, "リキャスト中"
     end
 
+    -- ③: 詠唱不可リスクに備えて送信前にディレイを設定
+    -- これにより同一prerender内で後続の魔法が実行されるのを防ぐ
+    state.special_delay_until = now() + DELAY_CONFIG.cast_fail
+
     -- ②: 全ての魔法を magic_judge でモニタリング開始
     magic_judge.start(spell.name, source_set)
     
@@ -684,6 +688,7 @@ end
 -- 戦闘バフ専用 cast_spell
 -- ②: combatbuff も magic_judge を通すように変更
 -- ⑥e: 優先度 5（自動戦闘バフ）
+-- ③: 詠唱不可リスクに備えて送信前にディレイ設定
 ------------------------------------------------------------
 local function cast_spell_combatbuff(spell, target)
     if spell.recast_id and not can_cast(spell.recast_id) then
@@ -701,6 +706,10 @@ local function cast_spell_combatbuff(spell, target)
         return true
     end
 
+    -- ③: 詠唱不可リスクに備えて送信前にディレイを設定
+    -- これにより同一prerender内で後続の魔法が実行されるのを防ぐ
+    state.special_delay_until = now() + DELAY_CONFIG.cast_fail
+    
     -- ②: combatbuff も magic_judge でモニタリング
     magic_judge.start(spell.name, 'combatbuff')
     
@@ -814,6 +823,10 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
     state.queued_special.target = nil
     state.queued_special.is_sleep2 = false
     state.queued_special.priority = nil
+
+    -- ③: 詠唱不可リスクに備えて送信前にディレイを設定
+    -- これにより同一prerender内で後続の魔法が実行されるのを防ぐ
+    state.special_delay_until = now() + DELAY_CONFIG.cast_fail
 
     magic_judge.start(name, "special")
 
@@ -1518,6 +1531,9 @@ local function try_start_mb1(spell_name, target, opts)
     state.mbset.mb1_start_time = now()
     state.mbset.pending_mb1 = false
 
+    -- ③: 詠唱不可リスクに備えて送信前にディレイを設定
+    state.special_delay_until = now() + DELAY_CONFIG.cast_fail
+
     -- ②: magic_judge でモニタリング開始
     magic_judge.start(spell_name, 'mbset')
     
@@ -1551,6 +1567,9 @@ local function try_start_mb2(spell_name, target)
 
     state.mbset.mb2_spell = spell_name
     state.mbset.mb2_target = target
+
+    -- ③: 詠唱不可リスクに備えて送信前にディレイを設定
+    state.special_delay_until = now() + DELAY_CONFIG.cast_fail
 
     -- ②: magic_judge でモニタリング開始
     magic_judge.start(spell_name, 'mbset')
