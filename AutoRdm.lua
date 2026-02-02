@@ -290,9 +290,6 @@ local state = {
 state.mbset = {
     active = false,
     priority = 2, -- MB Set の優先度 (①: スペシャル魔法＞MBセット＞WSセット＞強化セット＞自動戦闘バフ)
-    count = 0,
-    last_ws_time = 0,
-    thresholds = {10,9,8,7},
     pending_mb1 = false, -- ⑥b-1: MB1のみ予約あり
     mb1_spell = nil,
     mb2_spell = nil,
@@ -302,7 +299,7 @@ state.mbset = {
     mb2_time = 0,
     mb2_release_time = 0,
     last_detected_sc = nil,
-    last_props = nil,
+    last_props = nil, -- Last WS properties for skillchain calculation
     awaiting_mb2 = false,
     reserved_during_special = false, -- ①: スペシャル魔法中に連携検知した場合の予約フラグ
 }
@@ -1308,11 +1305,7 @@ reset_mbset = function(reason)
         log_msg('finish', '【MB】', 'MBセット', '完了')
     end
 
-    -- Reset ONLY MB-related state (NOT skillchain tracking)
-    -- Preserved for skillchain tracking:
-    --   m.count
-    --   m.last_ws_time
-    --   m.last_props
+    -- Reset MB-related state (last_props kept for next SC calculation)
     m.active = false
     m.pending_mb1 = false
     m.mb1_spell = nil
@@ -1328,17 +1321,6 @@ reset_mbset = function(reason)
 
     state.suspend_buffs = false
     state.buff_resume_time = now()
-end
-
-------------------------------------------------------------
--- reset_ws_chain: Resets WS chain tracking state independently of MB state
--- Used when WS chains should be terminated (timeouts, combat end, target change)
-------------------------------------------------------------
-local function reset_ws_chain()
-    local m = state.mbset
-    m.count = 0
-    m.last_ws_time = 0
-    m.last_props = nil
 end
 
 ------------------------------------------------------------
@@ -1459,14 +1441,11 @@ local function detect_with_wsdetector(act, last_props, mode, cfg, hit_flag)
 end
 
 ------------------------------------------------------------
--- MB 検出結果の処理（検出失敗時は仕切り直し、決定時にMBセット開始ログを出す）
--- 変更: WS検出とMBセットを完全に独立させる
---   - 連携検出時は常に既存MBセットを終了して新しいMBセットを開始
---   - WS カウントは独立して維持（チェイン追跡用）
---   - 時間外判定はWSカウントのみリセット
+-- MB 検出結果の処理
+-- 変更: incoming chunk 0x028 のメッセージから実際の連携のみを検出
+--   - add_effect_message が連携IDの時のみMBセットを開始
+--   - WS カウント、タイミング判定などの複雑なロジックを削除
 ------------------------------------------------------------
-local MIN_MB_WINDOW = 3.0
-local MIN_WS_COUNT_FOR_SKILLCHAIN = 2  -- Skillchain detection implies at least 2 WSs
 
 local function process_analyzed_ws(result, act)
     if not result then return end
@@ -1492,13 +1471,14 @@ local function process_analyzed_ws(result, act)
         return
     end
 
-    local t = now()
     local m = state.mbset
 
-    -- Skillchain detection - independent of count
+    -- Skillchain detection from WS_Detector
+    -- WS_Detector analyzes the action packet (0x028) and detects skillchains either:
+    -- 1. From add_effect_message (packet-based, Level 2/3 SCs)
+    -- 2. From WS property calculation (when ws1_props available, Level 1 SCs)
     local sc_detected = (result.sc_en ~= nil)
     
-    -- If skillchain detected, ALWAYS terminate current MB set and start new one
     if sc_detected then
         -- Check if there's an active MB set to terminate
         local was_active = m.active or m.mb1_spell or m.mb2_spell or m.pending_mb1
@@ -1518,27 +1498,17 @@ local function process_analyzed_ws(result, act)
         m.pending_mb1 = true
         m.last_detected_sc = result.sc_en
         m.mb2_time = 0
-
-        -- Update WS tracking (independent)
-        local prev_ws_time = m.last_ws_time
-        m.last_ws_time = t
+        
+        -- Track last WS properties for next skillchain calculation
         m.last_props = result.props
-        if m.count == 0 then
-            m.count = MIN_WS_COUNT_FOR_SKILLCHAIN  -- First detected skillchain
-        else
-            -- Increment count within time window
-            local idx = math.min(m.count, #m.thresholds)
-            local max_allowed = m.thresholds[idx] or 7
-            local elapsed = t - (prev_ws_time or 0)
-            if elapsed >= MIN_MB_WINDOW and elapsed <= max_allowed then
-                m.count = math.min(5, m.count + 1)
-            else
-                m.count = MIN_WS_COUNT_FOR_SKILLCHAIN  -- New chain detected outside window
-            end
-        end
 
         -- MBセット開始ログ
-        log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s count=%d', mb1, mb2, result.sc_en, m.count))
+        local add_effect_msg = result.add_effect_message or 0
+        if add_effect_msg > 0 then
+            log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (packet:msg=%d)', mb1, mb2, result.sc_en, add_effect_msg))
+        else
+            log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (calculated)', mb1, mb2, result.sc_en))
+        end
 
         -- Try to start MB1 immediately if possible
         if not state.current_special.name then
@@ -1556,36 +1526,10 @@ local function process_analyzed_ws(result, act)
         return
     end
 
-    -- No skillchain detected - update WS count independently
-    if m.count == 0 then
-        -- First WS in potential chain
-        m.count = 1
-        m.last_ws_time = t
+    -- No skillchain detected - update last_props for potential next SC
+    if result.props then
         m.last_props = result.props
-        m.active = true
-        return
     end
-
-    -- Check timing for chaining
-    local idx = math.min(m.count, #m.thresholds)
-    local max_allowed = m.thresholds[idx] or 7
-    local elapsed = t - (m.last_ws_time or 0)
-
-    -- Time-based reset: only affects WS count, not MB state
-    if elapsed < MIN_MB_WINDOW or elapsed > max_allowed then
-        -- Outside valid time window: reset WS count, treat as new chain start
-        m.count = 1
-        m.last_ws_time = t
-        m.last_props = result.props
-        m.active = true
-        -- Note: MB set is NOT reset here; only WS tracking is reset
-        return
-    end
-
-    -- Within valid time window: increment WS count
-    m.count = math.min(5, m.count + 1)
-    m.last_ws_time = t
-    m.last_props = result.props
 end
 
 ------------------------------------------------------------
@@ -1661,27 +1605,12 @@ local function process_mbset_in_prerender(t)
         end
     end
 
-    -- タイムアウト判定: MB2 を待っている場合は短期タイムアウトを抑制し、長期タイムアウトのみ許容
-    if m.count > 0 then
-        -- MB2実行待機中かチェック（mb2_timeが設定されており、実行時刻に達している場合）
-        local waiting_for_mb2_execution = (m.mb2_time and m.mb2_time > 0 and t >= m.mb2_time)
-        
-        if m.awaiting_mb2 or waiting_for_mb2_execution then
-            -- 長い閾値（MB1開始からの長時間遅延を異常とする）
-            -- ただし、MB2実行待機中の場合は、MB2タイムアウトが優先されるためスキップ
-            if not waiting_for_mb2_execution then
-                local LONG_TIMEOUT = 5.0
-                if m.mb1_start_time and (t - (m.mb1_start_time or 0) > LONG_TIMEOUT) then
-                    reset_mbset('タイムアウト')
-                    reset_ws_chain()  -- Reset WS chain on MB timeout
-                end
-            end
-        else
-            local SHORT_WINDOW = (m.thresholds[1] or 10) + 0.5
-            if t - (m.last_ws_time or 0) > SHORT_WINDOW then
-                reset_mbset('タイムアウト')
-                reset_ws_chain()  -- Reset WS chain on WS timeout
-            end
+    -- タイムアウト判定: MB待機時の長時間タイムアウト
+    if m.active and m.awaiting_mb2 then
+        -- 長い閾値（MB1開始からの長時間遅延を異常とする）
+        local LONG_TIMEOUT = 8.0
+        if m.mb1_start_time and (t - (m.mb1_start_time or 0) > LONG_TIMEOUT) then
+            reset_mbset('タイムアウト')
         end
     end
 end
@@ -2035,7 +1964,7 @@ local function emit_combat_end(reason)
     -- サイレントに外部状態をリセット（WS の終了ログは出さない）
     ws_set_off(true)        -- suppress_log = true
     reset_mbset()           -- silent reset (no reason -> no MB finish log)
-    reset_ws_chain()        -- Reset WS chain tracking on combat end
+    -- reset_ws_chain removed (WS tracking no longer needed)
 
     -- 直後の重複出力を抑止（1秒程度）
     state.combat_end_suppressed_until = t + 1.0
@@ -2084,7 +2013,7 @@ windower.register_event('prerender', function()
             -- サイレントにリセット
             ws_set_off(true)
             reset_mbset()
-            reset_ws_chain()  -- Reset WS chain on target change
+            -- reset_ws_chain removed (WS tracking no longer needed)
         else
             if state.ws.active then
                 --log_msg('finish', '【WS】', 'WSセット', '完了', 'ターゲット撃破')
@@ -2093,7 +2022,7 @@ windower.register_event('prerender', function()
 
             -- ターゲット変更時に MB をリセット（理由付きログ）
             reset_mbset('ターゲット切替')
-            reset_ws_chain()  -- Reset WS chain on target change
+            -- reset_ws_chain removed (WS tracking no longer needed)
         end
 
         state.current_special.name = nil
@@ -2499,7 +2428,7 @@ function reset_all_states()
     end
 
     reset_mbset()
-    reset_ws_chain()  -- Also reset WS chain tracking on full reset
+    -- reset_ws_chain removed (WS tracking no longer needed)
 
     log('完全リセット')
 end
@@ -2536,7 +2465,7 @@ windower.register_event('addon command', function(...)
         state.buffset.next_time = 0
         reset_retry()
         reset_mbset()
-        reset_ws_chain()  -- Also reset WS chain tracking on addon off
+        -- reset_ws_chain removed (WS tracking no longer needed)
         log('OFF')
 
     elseif cmd == 'reset' then
@@ -2573,7 +2502,7 @@ windower.register_event('addon command', function(...)
         enqueue_special_spell(spells.cure4.name, spells.cure4.recast_id, nil, false)
 
     elseif cmd == 'debug' then
-        log(('debug: ws_active=%s buffset=%s step=%d waiting=%s special=%s retry_active=%s mbset.active=%s mbcount=%d last_props=%s target_id=%s suspend_buffs=%s'):format(
+        log(('debug: ws_active=%s buffset=%s step=%d waiting=%s special=%s retry_active=%s mbset.active=%s target_id=%s suspend_buffs=%s'):format(
             tostring(state.ws.active),
             tostring(state.buffset.active),
             state.buffset.step,
@@ -2581,8 +2510,6 @@ windower.register_event('addon command', function(...)
             tostring(state.current_special.name or 'nil'),
             tostring(state.retry.active),
             tostring(state.mbset.active),
-            tonumber(state.mbset.count or 0),
-            tostring(state.mbset.last_props and table.concat(state.mbset.last_props, ',') or 'nil'),
             tostring(state.last_target_id or 'nil'),
             tostring(state.suspend_buffs)
         ))
