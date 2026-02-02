@@ -5,7 +5,7 @@
 
 _addon.name     = 'AutoRdm'
 _addon.author   = 'Kazuhiro+Copilot'
-_addon.version  = '5.36'
+_addon.version  = '5.37'
 _addon.commands = {'ardm'}
 
 ------------------------------------------------------------
@@ -1644,18 +1644,14 @@ local function process_analyzed_ws(result, act)
         -- Log MB set start
         log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (add_msg=%d)', mb1, mb2, sc_en or 'unknown', add_msg))
         
-        -- Try to start MB1 immediately if possible
-        if not state.current_special.name then
-            local ok, reason = can_start_special()
-            if ok then
-                try_start_mb1(m.mb1_spell, m.mb1_target)
-            else
-                log_msg('notice', '【MB】', m.mb1_spell, '予約')
-            end
-        else
-            -- If casting special magic, reserve the MB
+        -- MB1 is reserved via pending_mb1 flag (set above at line 1640)
+        -- process_mbset_in_prerender() will handle the actual execution when can_start_special() is ready
+        -- This prevents immediate execution that could cause "cannot cast spell" errors
+        if state.current_special.name then
             m.reserved_during_special = true
             log_msg('notice', '【MB】', m.mb1_spell, 'スペシャル魔法中に予約')
+        else
+            log_msg('notice', '【MB】', m.mb1_spell, 'MB1予約')
         end
     end
 end
@@ -2075,100 +2071,6 @@ local function handle_spell_finish(act)
 end
 
 windower.register_event('action', handle_spell_finish)
-
-------------------------------------------------------------
--- incoming chunk: Action Message (0x29) handler for skillchain detection
--- DISABLED: This approach was unreliable because 0x29 packets don't have proper target info
--- We now use action packet add_effect_message instead (see process_analyzed_ws)
-------------------------------------------------------------
---[[
-windower.register_event('incoming chunk', function(id, data)
-    -- Only process Action Message packets (0x29)
-    if id ~= 0x29 then return end
-    
-    -- Check if enabled and is RDM
-    if not state.enabled then return end
-    local p = get_player()
-    if not p or p.main_job_id ~= JOB_RDM then return end
-    
-    -- Check if in combat
-    if p.status ~= 1 then return end
-    
-    -- Check if we have a target
-    local my_target = windower.ffxi.get_mob_by_target('t')
-    if not my_target then return end
-    
-    -- Parse the packet
-    local pkt = packets.parse('incoming', data)
-    if not pkt then return end
-    
-    -- Get message ID
-    local msg_id = pkt['Message ID']
-    if not msg_id then return end
-    
-    -- Check if this is a skillchain message
-    if not SC_SKILLCHAIN_IDS[msg_id] then return end
-    
-    -- Check if the skillchain target matches the player's current target
-    local pkt_target = pkt['Target']
-    if pkt_target and pkt_target ~= my_target.id then
-        -- Skillchain is not on our target, ignore it
-        return
-    end
-    
-    -- Get skillchain name from message ID
-    local sc_en = SC_MESSAGE_ID_TO_NAME[msg_id]
-    if not sc_en then return end
-    
-    -- Determine MB magic based on skillchain using module-level tables
-    local sc_ja = SC_EN_TO_JA[sc_en]
-    local mb1, mb2
-    if sc_ja and MB_MAP[sc_ja] then
-        mb1 = MB_MAP[sc_ja].mb3
-        mb2 = MB_MAP[sc_ja].mb2
-    else
-        mb1 = "サンダーII"
-        mb2 = "サンダー"
-    end
-    
-    -- Get mbset state
-    local m = state.mbset
-    
-    -- Check if there's an active MB set to terminate
-    local was_active = m.active or m.mb1_spell or m.mb2_spell or m.pending_mb1
-    if was_active then
-        reset_mbset('新しい連携を検知; MBセットをリセット')
-    end
-    
-    -- Start new MB set with detected skillchain
-    m.active = true
-    m.mb1_spell = mb1
-    m.mb2_spell = mb2
-    m.mb1_target = '<t>'
-    m.mb2_target = '<t>'
-    m.pending_mb1 = true
-    m.last_detected_sc = sc_en
-    m.mb2_time = 0
-    
-    -- Log MB set start
-    log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (message:msg=%d)', mb1, mb2, sc_en, msg_id))
-    
-    -- Try to start MB1 immediately if possible
-    if not state.current_special.name then
-        local ok, reason = can_start_special()
-        if ok then
-            try_start_mb1(m.mb1_spell, m.mb1_target)
-        else
-            log_msg('notice', '【MB】', m.mb1_spell, '予約')
-        end
-    else
-        -- If casting special magic, reserve the MB
-        m.reserved_during_special = true
-        log_msg('notice', '【MB】', m.mb1_spell, 'スペシャル魔法中に予約')
-    end
-end)
---]]
-
 
 ------------------------------------------------------------
 -- 戦闘終了一元処理（重複ログ抑止）
