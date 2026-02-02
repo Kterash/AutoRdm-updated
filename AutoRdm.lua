@@ -491,7 +491,8 @@ local function can_start_special()
     
     -- ディレイ判定 (②: special_delay_until に統一)
     if now() < state.special_delay_until then
-        return false, "SP完了後ディレイ中"
+        local remaining = state.special_delay_until - now()
+        return false, string.format("SP完了後ディレイ中 (残り%.2f秒)", remaining)
     end
     
     return true, nil
@@ -2564,8 +2565,9 @@ end
 if magic_judge and magic_judge.state then
     magic_judge.state.on_cast_fail_callback = function(spell_name, source_set, reason)
         -- ③: 詠唱不可後ディレイを設定し、can_start_special に含める
-        state.special_delay_until = now() + DELAY_CONFIG.cast_fail
-        log_msg('abort', string.format('【%s】', source_set or 'unknown'), spell_name or '', '詠唱不可', reason or '')
+        local delay_time = DELAY_CONFIG.cast_fail
+        state.special_delay_until = now() + delay_time
+        log_msg('abort', string.format('【%s】', source_set or 'unknown'), spell_name or '', '詠唱不可', string.format('%s (ディレイ%.1f秒設定)', reason or '', delay_time))
     end
 end
 

@@ -232,9 +232,11 @@ function magic_judge.on_action(act)
         state.last_result     = "fail"
         state.last_result_src = state.source_set
         
-        -- ③: 詠唱不可後コールバック実行（action判定でも）
+        -- ③: 詠唱不可後コールバック実行
+        -- 注: これは魔法が発動したが失敗した場合（レジスト、中断等）
+        -- 魔法が発動しない「詠唱不可」の場合はincoming chunkで検出される
         if state.on_cast_fail_callback then
-            state.on_cast_fail_callback(state.spell_name, state.source_set, "action_packet")
+            state.on_cast_fail_callback(state.spell_name, state.source_set, "action_fail")
         end
         
         return
