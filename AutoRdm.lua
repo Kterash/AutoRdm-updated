@@ -1367,7 +1367,7 @@ local function try_start_mb1(spell_name, target, opts)
     log_msg('report', '【MB】', spell_name, 'MB1 詠唱開始')
 
     -- ⑥b-2: MB2 は MB1発動2秒後に実行
-    state.mbset.mb2_time = state.mbset.mb1_start_time + DELAY_CONFIG.mb2_after_mb1 + 2.5
+    state.mbset.mb2_time = state.mbset.mb1_start_time + DELAY_CONFIG.mb2_after_mb1
 
     state.mbset.awaiting_mb2 = (state.mbset.mb2_spell ~= nil)
 
@@ -1481,6 +1481,9 @@ local function process_analyzed_ws(result, act)
         m.pending_mb1 = true
         m.last_detected_sc = result.sc_en
         m.mb2_time = 0
+        
+        -- ①: Suspend buffs immediately when MB set becomes active to prevent auto-battle buff interruption
+        state.suspend_buffs = true
 
         -- Update WS tracking (independent)
         local prev_ws_time = m.last_ws_time
