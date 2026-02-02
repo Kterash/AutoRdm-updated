@@ -929,6 +929,7 @@ local function process_buffset()
             state.buffset.next_step_on_finish = 0
             state.buffset.next_time           = t + 0.5
             state.buffset_last_finish_time    = t
+            state.buffset.step_start_time     = 0
         end
         return
     end
@@ -1892,6 +1893,7 @@ local function handle_spell_finish(act)
         state.buffset.next_step_on_finish = 0
         state.buffset.next_time           = now() + 0.5
         state.buffset_last_finish_time    = now()
+        state.buffset.step_start_time     = 0
     end
 
     -- MB1 完了
@@ -2157,7 +2159,7 @@ windower.register_event('prerender', function()
         end
     end
 
-    if state.buffset.active and not state.current_special.name and state.buffset.step_start_time and (t - state.buffset.step_start_time > 5) then
+    if state.buffset.active and state.buffset.waiting_for_finish and not state.current_special.name and state.buffset.step_start_time and (t - state.buffset.step_start_time > 5) then
         log_msg('abort', '【safety】', '強化セット', '中断', '5秒以上継続')
         state.buffset.active = false
         state.buffset.step = 0
