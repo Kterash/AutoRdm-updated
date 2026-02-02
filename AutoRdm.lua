@@ -321,13 +321,13 @@ local SPECIAL_PRIORITY = {
 -- ディレイ設定の一元管理
 local DELAY_CONFIG = {
     -- 魔法完了後のディレイ
-    magic_complete = 3.0,
+    magic_complete = 3.5,
     -- WS完了後のディレイ
-    ws_complete = 3.0,
+    ws_complete = 3.5,
     -- スペシャル魔法完了後のディレイ
-    special_complete = 3.0,
+    special_complete = 3.5,
     -- 魔法詠唱不可時のディレイ (③ 詠唱不可後ディレイ)
-    cast_fail = 1.5,
+    cast_fail = 2.0,
     -- 戦闘バフ完了後のインターバル (⑥e)
     combatbuff_interval = 6.0,
     -- MB2発動タイミング (⑥b-2: MB1発動2秒後)
@@ -819,7 +819,7 @@ local BUFFET_LIST_COMBAT = {
     {name="ストライII",   next=0},
 }
 
-local BUFFET_TIMEOUT = 3.0
+local BUFFET_TIMEOUT = 3.5
 
 ------------------------------------------------------------
 -- buffset_cast_next
@@ -854,7 +854,7 @@ local function buffset_cast_next(list)
         return
     end
 
-    if now() - (state.buffset_last_finish_time or 0) < 3.0 then
+    if now() - (state.buffset_last_finish_time or 0) < 3.5 then
         return
     end
 
