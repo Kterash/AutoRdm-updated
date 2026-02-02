@@ -1495,6 +1495,8 @@ local function process_analyzed_ws(result, act)
     -- 
     -- MB set should only trigger when add_effect_message confirms actual skillchain
     -- Using SC_SKILLCHAIN_IDS table to validate packet-based skillchain confirmation
+    -- Note: add_effect_msg defaults to 0 when not present; SC_SKILLCHAIN_IDS[0] is nil, 
+    -- so the check correctly fails when no skillchain message is present
     local add_effect_msg = result.add_effect_message or 0
     local sc_confirmed_by_packet = SC_SKILLCHAIN_IDS[add_effect_msg]
     
@@ -1521,7 +1523,9 @@ local function process_analyzed_ws(result, act)
         -- Track last WS properties for next skillchain calculation
         m.last_props = result.props
 
-        -- MBセット開始ログ (add_effect_msg already defined above)
+        -- MBセット開始ログ
+        -- At this point, add_effect_msg is guaranteed to be a valid skillchain ID
+        -- because we're inside the sc_confirmed_by_packet check
         log_msg('start', '【MB】', 'MBセット', '開始', string.format('mb1=%s mb2=%s sc=%s (packet:msg=%d)', mb1, mb2, result.sc_en, add_effect_msg))
 
         -- Try to start MB1 immediately if possible
