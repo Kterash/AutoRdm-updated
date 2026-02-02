@@ -30,6 +30,21 @@ local JOB_NIN = 13
 local JOB_BLM = 4
 
 ------------------------------------------------------------
+-- Skillchain IDs (add_effect_message)
+-- These IDs confirm actual skillchain occurrence in action packets
+------------------------------------------------------------
+local SC_SKILLCHAIN_IDS = {
+    [288] = true,  -- Fragmentation
+    [289] = true,  -- Distortion
+    [290] = true,  -- Fusion
+    [291] = true,  -- Gravitation
+    [385] = true,  -- Light
+    [386] = true,  -- Darkness
+    [767] = true,  -- Radiance
+    [768] = true,  -- Umbra
+}
+
+------------------------------------------------------------
 -- spells（必要最小限の魔法定義）
 ------------------------------------------------------------
 local spells = {
@@ -1479,12 +1494,9 @@ local function process_analyzed_ws(result, act)
     -- 2. From WS property calculation (when ws1_props available, Level 1 SCs)
     -- 
     -- MB set should only trigger when add_effect_message confirms actual skillchain
-    -- The skillchain IDs in add_effect_message are: 288, 289, 290, 291, 385, 386, 767, 768
+    -- Using SC_SKILLCHAIN_IDS table to validate packet-based skillchain confirmation
     local add_effect_msg = result.add_effect_message or 0
-    local sc_confirmed_by_packet = (add_effect_msg == 288 or add_effect_msg == 289 or 
-                                    add_effect_msg == 290 or add_effect_msg == 291 or 
-                                    add_effect_msg == 385 or add_effect_msg == 386 or 
-                                    add_effect_msg == 767 or add_effect_msg == 768)
+    local sc_confirmed_by_packet = SC_SKILLCHAIN_IDS[add_effect_msg]
     
     if sc_confirmed_by_packet then
         -- Check if there's an active MB set to terminate
