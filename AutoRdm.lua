@@ -343,7 +343,7 @@ local DELAY_CONFIG = {
     cast_fail = 1.5,
     -- 戦闘バフ完了後のインターバル (⑥e)
     combatbuff_interval = 6.0,
-    -- MB2発動タイミング (⑥b-2: MB1発動2秒後)
+    -- MB2発動タイミング (⑥b-2: MB1発動3秒後)
     mb2_after_mb1 = 3.0,
 }
 
@@ -1400,8 +1400,8 @@ local function try_start_mb1(spell_name, target, opts)
     send_cmd(('input /ma "%s" %s'):format(spell_name, target))
     log_msg('report', '【MB】', spell_name, 'MB1 詠唱開始')
 
-    -- ⑥b-2: MB2 は MB1発動2秒後に実行
-    state.mbset.mb2_time = state.mbset.mb1_start_time + DELAY_CONFIG.mb2_after_mb1 + 2.5
+    -- ⑥b-2: MB2 の予定時刻は MB1 開始時刻 + DELAY_CONFIG.mb2_after_mb1
+    state.mbset.mb2_time = state.mbset.mb1_start_time + DELAY_CONFIG.mb2_after_mb1
 
     state.mbset.awaiting_mb2 = (state.mbset.mb2_spell ~= nil)
 
