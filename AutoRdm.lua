@@ -5,7 +5,7 @@
 
 _addon.name     = 'AutoRdm'
 _addon.author   = 'Kazuhiro+Copilot'
-_addon.version  = '5.32'
+_addon.version  = '5.33'
 _addon.commands = {'ardm'}
 
 ------------------------------------------------------------
@@ -724,6 +724,43 @@ end)
 -- ②: combatbuff.casting を廃止
 -- ⑥e: 独自インターバル 6秒
 ------------------------------------------------------------
+
+-- ③: 戦闘バフが切れているか、HP60%以下かをチェック
+local function should_prioritize_buffs()
+    local p = get_player()
+    if not p then return false end
+    
+    -- HP60%以下かチェック
+    if p.vitals.hpp <= 60 then
+        return true
+    end
+    
+    -- 空蝉チェック（サブ忍の場合）
+    if is_sub_nin() then
+        local has_utsu = has_buff(66) or has_buff(444) or has_buff(445)
+        if not has_utsu then
+            local recasts = windower.ffxi.get_spell_recasts()
+            if recasts then
+                local ni_rc = recasts[spells.utsu_ni.recast_id] or 0
+                local ichi_rc = recasts[spells.utsu_ichi.recast_id] or 0
+                -- リキャスト可能な空蝉がある場合のみtrue
+                if ni_rc == 0 or ichi_rc == 0 then
+                    return true
+                end
+            end
+        end
+    end
+    
+    -- ストンスキンチェック
+    if not has_buff(37) then
+        if can_cast(spells.stoneskin.recast_id) then
+            return true
+        end
+    end
+    
+    return false
+end
+
 local function process_buffs()
     local p = get_player()
     if not p then return end
@@ -1570,6 +1607,8 @@ local function process_mbset_in_prerender(t)
     end
 
     -- ⑥b-2: MB2 は MB1発動2秒後に実行
+    -- 修正: can_start_special()の中身を確認し、実行可能になるまで待機
+    -- ③: 戦闘バフが切れている、またはHP60%以下の場合はMB2をスキップして戦闘バフを優先
     if m.mb2_time and m.mb2_time > 0 and t >= m.mb2_time then
         -- ③: スペシャル魔法進行中なら MB2 を実行しない
         if state.current_special.name then
@@ -1578,21 +1617,64 @@ local function process_mbset_in_prerender(t)
             m.mb2_release_time = 0
             return
         end
-        if m.mb2_spell then
-            try_start_mb2(m.mb2_spell, m.mb2_target)
+        
+        -- ③: 戦闘バフ優先判定（バフ切れまたはHP60%以下）
+        if should_prioritize_buffs() then
+            log_msg('abort', '【MB】', m.mb2_spell or 'MB2', 'スキップ', '戦闘バフ優先')
+            -- MB2をスキップしてMBセットを終了
+            reset_mbset('MB2スキップ; 戦闘バフ優先')
+            -- 戦闘バフをすぐに実行できるようにsuspend_buffsを解除
+            state.suspend_buffs = false
+            return
         end
-        m.mb2_time = 0
-        m.pending_mb1 = false
+        
+        -- can_start_special()の判定がOKになるまで待機
+        local ok, reason = can_start_special()
+        if ok then
+            -- 実行可能になった場合のみMB2を実行
+            if m.mb2_spell then
+                local success = try_start_mb2(m.mb2_spell, m.mb2_target)
+                -- 成功・失敗に関わらず状態をクリア
+                m.mb2_time = 0
+                m.mb2_release_time = 0
+                m.pending_mb1 = false
+                m.awaiting_mb2 = false
+            else
+                m.mb2_time = 0
+                m.mb2_release_time = 0
+                m.pending_mb1 = false
+                m.awaiting_mb2 = false
+            end
+        else
+            -- まだ実行不可の場合は、タイムアウトチェック
+            -- MB2タイムアウト: MB2予定時刻から最大3秒待機（special_complete相当）
+            -- 注意: awaiting_mb2をクリアして、既存のLONG_TIMEOUTと競合しないようにする
+            m.awaiting_mb2 = false
+            local MB2_WAIT_TIMEOUT = 3.0
+            if t - m.mb2_time > MB2_WAIT_TIMEOUT then
+                log_msg('abort', '【MB】', m.mb2_spell or 'MB2', '中断', string.format('タイムアウト(%s)', reason or '不明'))
+                m.mb2_time = 0
+                m.mb2_release_time = 0
+                m.pending_mb1 = false
+            end
+            -- タイムアウトしていない場合は次のループで再試行（m.mb2_timeを保持）
+        end
     end
 
     -- タイムアウト判定: MB2 を待っている場合は短期タイムアウトを抑制し、長期タイムアウトのみ許容
     if m.count > 0 then
-        if m.awaiting_mb2 then
+        -- MB2実行待機中かチェック（mb2_timeが設定されており、実行時刻に達している場合）
+        local waiting_for_mb2_execution = (m.mb2_time and m.mb2_time > 0 and t >= m.mb2_time)
+        
+        if m.awaiting_mb2 or waiting_for_mb2_execution then
             -- 長い閾値（MB1開始からの長時間遅延を異常とする）
-            local LONG_TIMEOUT = 5.0
-            if m.mb1_start_time and (t - (m.mb1_start_time or 0) > LONG_TIMEOUT) then
-                reset_mbset('タイムアウト')
-                reset_ws_chain()  -- Reset WS chain on MB timeout
+            -- ただし、MB2実行待機中の場合は、MB2タイムアウトが優先されるためスキップ
+            if not waiting_for_mb2_execution then
+                local LONG_TIMEOUT = 5.0
+                if m.mb1_start_time and (t - (m.mb1_start_time or 0) > LONG_TIMEOUT) then
+                    reset_mbset('タイムアウト')
+                    reset_ws_chain()  -- Reset WS chain on MB timeout
+                end
             end
         else
             local SHORT_WINDOW = (m.thresholds[1] or 10) + 0.5
@@ -1909,7 +1991,9 @@ local function handle_spell_finish(act)
                     m.mb2_time = now() + DELAY_CONFIG.mb2_after_mb1
                 end
                 m.awaiting_mb2 = true
-            else
+            elseif m.active then
+                -- MB2がなく、かつMBセットがまだアクティブな場合のみリセット
+                -- （すでにリセット済みの場合は何もしない）
                 reset_mbset('MB1のみで終了')
             end
         end
