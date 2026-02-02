@@ -1597,7 +1597,8 @@ local function process_mbset_in_prerender(t)
                 reset_mbset('タイムアウト')
                 reset_ws_chain()  -- Reset WS chain on MB timeout
             end
-        else
+        elseif not m.pending_mb1 then
+            -- ②: Only timeout if MB1 is not pending (to allow time for delays to expire)
             local SHORT_WINDOW = (m.thresholds[1] or 10) + 0.5
             if t - (m.last_ws_time or 0) > SHORT_WINDOW then
                 reset_mbset('タイムアウト')
