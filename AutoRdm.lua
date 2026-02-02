@@ -24,16 +24,18 @@ local bit = require('bit')
 
 ------------------------------------------------------------
 -- skillchain_messages テーブル
+-- incoming chunk 0x028 で検知するメッセージID
+-- スキルチェーン発生を示すメッセージIDのリスト
 ------------------------------------------------------------
 local skillchain_messages = {
     [196]=true, [223]=true,
-    -- 288〜303
+    -- 288〜303: スキルチェーン属性メッセージ（光、闇、核熱、分解、湾曲、重力など）
     [288]=true,[289]=true,[290]=true,[291]=true,[292]=true,[293]=true,[294]=true,[295]=true,
     [296]=true,[297]=true,[298]=true,[299]=true,[300]=true,[301]=true,[302]=true,[303]=true,
-    -- 回復系 385〜398
+    -- 回復系 385〜398: 回復魔法関連のスキルチェーンメッセージ
     [385]=true,[386]=true,[387]=true,[388]=true,[389]=true,[390]=true,[391]=true,[392]=true,
     [393]=true,[394]=true,[395]=true,[396]=true,[397]=true,[398]=true,
-    -- その他
+    -- その他: 特殊なスキルチェーン表示
     [732]=true,[767]=true,[768]=true,[769]=true,[770]=true,
     [503]=true, -- Element 表示
 }
@@ -1632,9 +1634,12 @@ local function process_skillchain_from_packet(t)
     end
     
     -- デフォルトのMB魔法でMBセットを開始
-    -- 注: 0x028からは具体的な連携属性が分からない場合があるため、デフォルト値を使用
-    local mb1 = "サンダーII"
-    local mb2 = "サンダー"
+    -- 注: 0x028からは具体的な連携属性が分からない場合があるため、デフォルトのサンダー系を使用
+    -- サンダー系は汎用性が高く、多くの連携属性に対応できる
+    local DEFAULT_MB1_SPELL = "サンダーII"
+    local DEFAULT_MB2_SPELL = "サンダー"
+    local mb1 = DEFAULT_MB1_SPELL
+    local mb2 = DEFAULT_MB2_SPELL
     
     m.active = true
     m.mb1_spell = mb1
@@ -1648,7 +1653,7 @@ local function process_skillchain_from_packet(t)
     -- WS tracking を更新
     m.last_ws_time = t
     if m.count == 0 then
-        m.count = 2  -- Skillchain implies at least 2 WSs
+        m.count = MIN_WS_COUNT_FOR_SKILLCHAIN  -- Skillchain implies at least 2 WSs
     else
         m.count = math.min(5, m.count + 1)
     end
