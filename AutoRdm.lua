@@ -5,7 +5,7 @@
 
 _addon.name     = 'AutoRdm'
 _addon.author   = 'Kazuhiro+Copilot'
-_addon.version  = '5.31'
+_addon.version  = '5.32'
 _addon.commands = {'ardm'}
 
 ------------------------------------------------------------
@@ -322,17 +322,17 @@ local SPECIAL_PRIORITY = {
 -- ディレイ設定の一元管理
 local DELAY_CONFIG = {
     -- 魔法完了後のディレイ
-    magic_complete = 3.5,
+    magic_complete = 3.0,
     -- WS完了後のディレイ
-    ws_complete = 3.5,
+    ws_complete = 3.0,
     -- スペシャル魔法完了後のディレイ
-    special_complete = 3.5,
+    special_complete = 3.0,
     -- 魔法詠唱不可時のディレイ (③ 詠唱不可後ディレイ)
-    cast_fail = 2.0,
+    cast_fail = 1.5,
     -- 戦闘バフ完了後のインターバル (⑥e)
     combatbuff_interval = 6.0,
     -- MB2発動タイミング (⑥b-2: MB1発動2秒後)
-    mb2_after_mb1 = 2.0,
+    mb2_after_mb1 = 3.0,
 }
 
 ------------------------------------------------------------
@@ -823,7 +823,7 @@ local BUFFET_LIST_COMBAT = {
     {name="ストライII",   next=0},
 }
 
-local BUFFET_TIMEOUT = 3.5
+local BUFFET_TIMEOUT = 3.0
 
 ------------------------------------------------------------
 -- buffset_cast_next
@@ -858,7 +858,7 @@ local function buffset_cast_next(list)
         return
     end
 
-    if now() - (state.buffset_last_finish_time or 0) < 3.5 then
+    if now() - (state.buffset_last_finish_time or 0) < 3.0 then
         return
     end
 
@@ -929,6 +929,7 @@ local function process_buffset()
             state.buffset.next_step_on_finish = 0
             state.buffset.next_time           = t + 0.5
             state.buffset_last_finish_time    = t
+            state.buffset.step_start_time     = 0
         end
         return
     end
@@ -1626,10 +1627,11 @@ windower.register_event('action', function(act)
     end
 
     if act.actor_id == p.id and act.category == 6 then
-        -- 魔法詠唱中断時（②: magic_judge が処理するのでここでは記録のみ）
-        log_msg('abort', '【magic】', '魔法', '詠唱中断')
-        -- ②: ディレイ設定は special_delay_until に統一
-        state.special_delay_until = now() + DELAY_CONFIG.magic_complete
+        -- magic_judge が監視中の場合のみ記録。そうでなければ magic_judge が判定するまで待つ。
+        if magic_judge and magic_judge.state and magic_judge.state.active then
+            log_msg('abort', '【magic】', '魔法', '詠唱中断')
+            state.special_delay_until = now() + DELAY_CONFIG.magic_complete
+        end
     end
 
     if act.actor_id == p.id and act.category == 7 then
@@ -1892,6 +1894,7 @@ local function handle_spell_finish(act)
         state.buffset.next_step_on_finish = 0
         state.buffset.next_time           = now() + 0.5
         state.buffset_last_finish_time    = now()
+        state.buffset.step_start_time     = 0
     end
 
     -- MB1 完了
@@ -2157,7 +2160,7 @@ windower.register_event('prerender', function()
         end
     end
 
-    if state.buffset.active and not state.current_special.name and state.buffset.step_start_time and (t - state.buffset.step_start_time > 5) then
+    if state.buffset.active and state.buffset.waiting_for_finish and not state.current_special.name and state.buffset.step_start_time and (t - state.buffset.step_start_time > 5) then
         log_msg('abort', '【safety】', '強化セット', '中断', '5秒以上継続')
         state.buffset.active = false
         state.buffset.step = 0
