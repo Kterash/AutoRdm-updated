@@ -318,6 +318,7 @@ state.mbset = {
     mb2_time = 0,
     mb2_release_time = 0,
     last_detected_sc = nil,
+    skillchain_detected_from_packet = false, -- incoming chunk 0x028 からのスキルチェーン検知フラグ
     last_props = nil,
     awaiting_mb2 = false,
     reserved_during_special = false, -- ①: スペシャル魔法中に連携検知した場合の予約フラグ
@@ -1605,11 +1606,79 @@ local function process_analyzed_ws(result, act)
 end
 
 ------------------------------------------------------------
+-- process_skillchain_from_packet
+-- incoming chunk 0x028 からのスキルチェーン検知を処理
+------------------------------------------------------------
+local function process_skillchain_from_packet(t)
+    local m = state.mbset
+    
+    -- skillchain_detected_from_packet フラグをチェック
+    if not m.skillchain_detected_from_packet then return end
+    
+    -- フラグをクリア（1回のみ処理）
+    m.skillchain_detected_from_packet = false
+    
+    -- プレイヤーが戦闘中でターゲットがいる場合のみ処理
+    local p = get_player()
+    if not p or p.status ~= 1 then return end
+    
+    local my_target = windower.ffxi.get_mob_by_target('t')
+    if not my_target then return end
+    
+    -- 既存のMBセットがあれば終了して新しいMBセットを開始
+    local was_active = m.active or m.mb1_spell or m.mb2_spell or m.pending_mb1
+    if was_active then
+        reset_mbset('新しい連携を検知(0x028); MBセットをリセット')
+    end
+    
+    -- デフォルトのMB魔法でMBセットを開始
+    -- 注: 0x028からは具体的な連携属性が分からない場合があるため、デフォルト値を使用
+    local mb1 = "サンダーII"
+    local mb2 = "サンダー"
+    
+    m.active = true
+    m.mb1_spell = mb1
+    m.mb2_spell = mb2
+    m.mb1_target = '<t>'
+    m.mb2_target = '<t>'
+    m.pending_mb1 = true
+    m.last_detected_sc = nil  -- 連携属性不明
+    m.mb2_time = 0
+    
+    -- WS tracking を更新
+    m.last_ws_time = t
+    if m.count == 0 then
+        m.count = 2  -- Skillchain implies at least 2 WSs
+    else
+        m.count = math.min(5, m.count + 1)
+    end
+    
+    log_msg('start', '【MB】', 'MBセット', '開始(0x028)', string.format('mb1=%s mb2=%s count=%d', mb1, mb2, m.count))
+    
+    -- MB1を即座に実行可能なら実行
+    if not state.current_special.name then
+        local ok, reason = can_start_special()
+        if ok then
+            try_start_mb1(m.mb1_spell, m.mb1_target)
+        else
+            log_msg('notice', '【MB】', m.mb1_spell, '予約')
+        end
+    else
+        m.reserved_during_special = true
+        log_msg('notice', '【MB】', m.mb1_spell, 'スペシャル魔法中に予約')
+    end
+end
+
+------------------------------------------------------------
 -- process_mbset_in_prerender
 -- ⑤: can_start_special を確認してMB実行
 ------------------------------------------------------------
 local function process_mbset_in_prerender(t)
     local m = state.mbset
+    
+    -- ①: incoming chunk 0x028 からのスキルチェーン検知を最初に処理
+    process_skillchain_from_packet(t)
+    
     if not m.active then return end
 
     -- ⑥b-1: MB1の予約があれば実行を試みる
@@ -2469,12 +2538,10 @@ windower.register_event('incoming chunk', function(id, data)
     local msg_id = pkt['Message ID']
     if not msg_id then return end
     
-    -- skillchain_messages テーブルに該当するメッセージIDの場合、MBセット起動を試みる
+    -- skillchain_messages テーブルに該当するメッセージIDの場合、MBセット起動フラグを設定
     if skillchain_messages[msg_id] then
-        -- MBセット起動のトリガーとして記録
-        -- 既存のWS検知ロジックと連携するため、ここでは検知フラグのみ設定
-        -- 実際のMB起動は既存のprocess_analyzed_wsロジックに委ねる
-        log_msg('notice', '【MB】', 'スキルチェーン', '検知', string.format('msg_id=%d', msg_id))
+        state.mbset.skillchain_detected_from_packet = true
+        log_msg('notice', '【MB】', 'スキルチェーン', '検知', string.format('msg_id=%d (0x028)', msg_id))
     end
 end)
 
