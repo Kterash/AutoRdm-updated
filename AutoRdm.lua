@@ -655,6 +655,7 @@ local function cast_spell(spell, target, opts)
     end
 
     -- ②: 全ての魔法を magic_judge でモニタリング開始
+    -- 修正: magic_judge.start() を検証後すぐに呼び出し、レースコンディションを防ぐ
     magic_judge.start(spell.name, source_set)
     
     state.last_spell = spell.name
@@ -701,6 +702,7 @@ local function cast_spell_combatbuff(spell, target)
     end
 
     -- ②: combatbuff も magic_judge でモニタリング
+    -- 修正: magic_judge.start() を検証後すぐに呼び出し、レースコンディションを防ぐ
     magic_judge.start(spell.name, 'combatbuff')
     
     send_cmd(('input /ma "%s" %s'):format(spell.name, target or '<me>'))
@@ -759,6 +761,10 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
         return
     end
 
+    -- 修正: magic_judge.start() を検証後すぐに呼び出し、レースコンディションを防ぐ
+    -- これにより、後続の処理中に別の魔法がcan_start_special()をパスすることを防ぐ
+    magic_judge.start(name, "special")
+
     -- ①: SP 実行時は WS/BUFFSET だけでなく MB も中断（完全終了）して再開しない
     if state.ws.active then
         log_msg('abort', '【WS】', 'WSセット', '中断', 'SP発動のため停止')
@@ -813,8 +819,6 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
     state.queued_special.target = nil
     state.queued_special.is_sleep2 = false
     state.queued_special.priority = nil
-
-    magic_judge.start(name, "special")
 
     send_cmd(('input /ma "%s" %s'):format(name, target))
 end
@@ -1494,6 +1498,9 @@ local function try_start_mb1(spell_name, target, opts)
         end
     end
 
+    -- 修正: magic_judge.start() を検証後すぐに呼び出し、レースコンディションを防ぐ
+    magic_judge.start(spell_name, 'mbset')
+
     -- ①: MB セット開始時は WS/BUFFSET を中断
     if state.ws.active then
         --log_msg('report', '【WS】', 'WSセット', '中断', 'MBセット発動')
@@ -1516,9 +1523,6 @@ local function try_start_mb1(spell_name, target, opts)
     state.mbset.mb1_target = target
     state.mbset.mb1_start_time = now()
     state.mbset.pending_mb1 = false
-
-    -- ②: magic_judge でモニタリング開始
-    magic_judge.start(spell_name, 'mbset')
     
     send_cmd(('input /ma "%s" %s'):format(spell_name, target))
     log_msg('report', '【MB】', spell_name, 'MB1 詠唱開始')
@@ -1546,13 +1550,13 @@ local function try_start_mb2(spell_name, target)
         return false
     end
 
+    -- 修正: magic_judge.start() を検証後すぐに呼び出し、レースコンディションを防ぐ
+    magic_judge.start(spell_name, 'mbset')
+
     state.last_spell = spell_name
 
     state.mbset.mb2_spell = spell_name
     state.mbset.mb2_target = target
-
-    -- ②: magic_judge でモニタリング開始
-    magic_judge.start(spell_name, 'mbset')
 
     send_cmd(('input /ma "%s" %s'):format(spell_name, target))
     log_msg('report', '【MB】', spell_name, 'MB2 詠唱開始')
