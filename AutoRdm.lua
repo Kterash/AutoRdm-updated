@@ -724,6 +724,43 @@ end)
 -- ②: combatbuff.casting を廃止
 -- ⑥e: 独自インターバル 6秒
 ------------------------------------------------------------
+
+-- ③: 戦闘バフが切れているか、HP60%以下かをチェック
+local function should_prioritize_buffs()
+    local p = get_player()
+    if not p then return false end
+    
+    -- HP60%以下かチェック
+    if p.vitals.hpp <= 60 then
+        return true
+    end
+    
+    -- 空蝉チェック（サブ忍の場合）
+    if is_sub_nin() then
+        local has_utsu = has_buff(66) or has_buff(444) or has_buff(445)
+        if not has_utsu then
+            local recasts = windower.ffxi.get_spell_recasts()
+            if recasts then
+                local ni_rc = recasts[spells.utsu_ni.recast_id] or 0
+                local ichi_rc = recasts[spells.utsu_ichi.recast_id] or 0
+                -- リキャスト可能な空蝉がある場合のみtrue
+                if ni_rc == 0 or ichi_rc == 0 then
+                    return true
+                end
+            end
+        end
+    end
+    
+    -- ストンスキンチェック
+    if not has_buff(37) then
+        if can_cast(spells.stoneskin.recast_id) then
+            return true
+        end
+    end
+    
+    return false
+end
+
 local function process_buffs()
     local p = get_player()
     if not p then return end
@@ -1571,12 +1608,23 @@ local function process_mbset_in_prerender(t)
 
     -- ⑥b-2: MB2 は MB1発動2秒後に実行
     -- 修正: can_start_special()の中身を確認し、実行可能になるまで待機
+    -- ③: 戦闘バフが切れている、またはHP60%以下の場合はMB2をスキップして戦闘バフを優先
     if m.mb2_time and m.mb2_time > 0 and t >= m.mb2_time then
         -- ③: スペシャル魔法進行中なら MB2 を実行しない
         if state.current_special.name then
             log_msg('abort', '【MB】', m.mb2_spell or 'MB2', '中断', 'スペシャル魔法中')
             m.mb2_time = 0
             m.mb2_release_time = 0
+            return
+        end
+        
+        -- ③: 戦闘バフ優先判定（バフ切れまたはHP60%以下）
+        if should_prioritize_buffs() then
+            log_msg('abort', '【MB】', m.mb2_spell or 'MB2', 'スキップ', '戦闘バフ優先')
+            -- MB2をスキップしてMBセットを終了
+            reset_mbset('MB2スキップ; 戦闘バフ優先')
+            -- 戦闘バフをすぐに実行できるようにsuspend_buffsを解除
+            state.suspend_buffs = false
             return
         end
         
