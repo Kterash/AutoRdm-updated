@@ -744,6 +744,8 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
     end
 
     if is_sleep2 and target == '<stnpc>' then
+        -- 修正: Sleep2初回も magic_judge でトラッキング開始
+        magic_judge.start(name, "special")
         send_cmd(('input /ma "%s" <stnpc>'):format(name))
         state.sleep2_initial = true
         state.sleep2_waiting_for_confirm = true
