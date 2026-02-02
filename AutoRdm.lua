@@ -1943,7 +1943,9 @@ local function handle_spell_finish(act)
                     m.mb2_time = now() + DELAY_CONFIG.mb2_after_mb1
                 end
                 m.awaiting_mb2 = true
-            else
+            elseif m.active then
+                -- MB2がなく、かつMBセットがまだアクティブな場合のみリセット
+                -- （すでにリセット済みの場合は何もしない）
                 reset_mbset('MB1のみで終了')
             end
         end
