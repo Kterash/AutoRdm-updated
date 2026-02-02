@@ -1570,6 +1570,7 @@ local function process_mbset_in_prerender(t)
     end
 
     -- ⑥b-2: MB2 は MB1発動2秒後に実行
+    -- 修正: can_start_special()の中身を確認し、実行可能になるまで待機
     if m.mb2_time and m.mb2_time > 0 and t >= m.mb2_time then
         -- ③: スペシャル魔法進行中なら MB2 を実行しない
         if state.current_special.name then
@@ -1578,11 +1579,33 @@ local function process_mbset_in_prerender(t)
             m.mb2_release_time = 0
             return
         end
-        if m.mb2_spell then
-            try_start_mb2(m.mb2_spell, m.mb2_target)
+        
+        -- can_start_special()の判定がOKになるまで待機
+        local ok, reason = can_start_special()
+        if ok then
+            -- 実行可能になった場合のみMB2を実行
+            if m.mb2_spell then
+                local success = try_start_mb2(m.mb2_spell, m.mb2_target)
+                if success then
+                    m.mb2_time = 0
+                    m.pending_mb1 = false
+                end
+            else
+                m.mb2_time = 0
+                m.pending_mb1 = false
+            end
+        else
+            -- まだ実行不可の場合は、タイムアウトチェック
+            -- MB2タイムアウト: MB2予定時刻から最大3秒待機（special_complete相当）
+            local MB2_WAIT_TIMEOUT = 3.0
+            if t - m.mb2_time > MB2_WAIT_TIMEOUT then
+                log_msg('abort', '【MB】', m.mb2_spell or 'MB2', '中断', string.format('タイムアウト(%s)', reason or '不明'))
+                m.mb2_time = 0
+                m.mb2_release_time = 0
+                m.pending_mb1 = false
+            end
+            -- タイムアウトしていない場合は次のループで再試行（m.mb2_timeを保持）
         end
-        m.mb2_time = 0
-        m.pending_mb1 = false
     end
 
     -- タイムアウト判定: MB2 を待っている場合は短期タイムアウトを抑制し、長期タイムアウトのみ許容
