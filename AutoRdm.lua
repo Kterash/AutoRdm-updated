@@ -1615,12 +1615,18 @@ local function process_mbset_in_prerender(t)
 
     -- タイムアウト判定: MB2 を待っている場合は短期タイムアウトを抑制し、長期タイムアウトのみ許容
     if m.count > 0 then
-        if m.awaiting_mb2 then
+        -- MB2実行待機中かチェック（mb2_timeが設定されており、実行時刻に達している場合）
+        local waiting_for_mb2_execution = (m.mb2_time and m.mb2_time > 0 and t >= m.mb2_time)
+        
+        if m.awaiting_mb2 or waiting_for_mb2_execution then
             -- 長い閾値（MB1開始からの長時間遅延を異常とする）
-            local LONG_TIMEOUT = 5.0
-            if m.mb1_start_time and (t - (m.mb1_start_time or 0) > LONG_TIMEOUT) then
-                reset_mbset('タイムアウト')
-                reset_ws_chain()  -- Reset WS chain on MB timeout
+            -- ただし、MB2実行待機中の場合は、MB2タイムアウトが優先されるためスキップ
+            if not waiting_for_mb2_execution then
+                local LONG_TIMEOUT = 5.0
+                if m.mb1_start_time and (t - (m.mb1_start_time or 0) > LONG_TIMEOUT) then
+                    reset_mbset('タイムアウト')
+                    reset_ws_chain()  -- Reset WS chain on MB timeout
+                end
             end
         else
             local SHORT_WINDOW = (m.thresholds[1] or 10) + 0.5
