@@ -2153,6 +2153,15 @@ end
 windower.register_event('prerender', function()
     local t = now()
 
+    -- ③: magic_judge と ws_judge のタイムアウトチェックを最優先で実行
+    -- どんな条件でも、これだけは必ず実行されるようにする（鉄壁のタイムアウト）
+    if ws_judge and ws_judge.state and ws_judge.check_timeout then 
+        ws_judge.check_timeout() 
+    end
+    if magic_judge and magic_judge.state and magic_judge.check_timeout then 
+        magic_judge.check_timeout() 
+    end
+
     if not state.enabled then return end
     local p = get_player()
     if not p or p.main_job_id ~= JOB_RDM then return end
@@ -2361,8 +2370,7 @@ windower.register_event('prerender', function()
         state.buffset.next_time = 0
     end
 
-    if ws_judge and ws_judge.state and ws_judge.check_timeout then ws_judge.check_timeout() end
-    if magic_judge and magic_judge.state and magic_judge.check_timeout then magic_judge.check_timeout() end
+    -- ③: タイムアウトチェックは prerender の最初に移動済み（鉄壁のタイムアウト）
 
     -- ⑥a: スペシャル魔法のリトライ処理
     if state.retry.active then
