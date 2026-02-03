@@ -168,11 +168,12 @@ end
 -- 成功判定
 ------------------------------------------------------------
 local function is_success(hit, act)
-    if act.category == 4 then
-        return true
-    end
-
+    -- Category 4 = spell casting action
+    -- However, category 4 alone doesn't guarantee success - the spell could be interrupted
+    -- We need to check for actual success indicators
+    
     if not hit then
+        -- No hit data means no spell effect, so not a success
         return false
     end
 
