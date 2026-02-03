@@ -29,7 +29,7 @@ local SUCCESS_WS = {
 }
 
 -- 失敗扱い（ミス・ダメージ0・実行できない）
-FAIL_WS = {
+local FAIL_WS = {
     -- WS実行不可
     [89]=true,  -- Unable to use weapon skill
     [90]=true,  -- Unable to use weapon skill
