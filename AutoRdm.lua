@@ -480,6 +480,12 @@ local DELAY_CONFIG = {
 -- ⑦: 同一prerender tick内での多重実行を防止
 ------------------------------------------------------------
 local function can_start_special()
+    -- ⑦: 同一prerender tick内での多重実行防止（早期リターンで効率化）
+    -- アクションが開始されたら、同じtick内では他のアクションを許可しない
+    if state.action_started_this_tick then
+        return false, "アクション実行中"
+    end
+    
     -- WS実行中判定
     if state.ws_motion then
         return false, "WSモーション中"
@@ -491,12 +497,6 @@ local function can_start_special()
     -- 魔法詠唱中判定 (②: magic_judge.state.active に統一)
     if magic_judge and magic_judge.state and magic_judge.state.active then
         return false, "魔法判定中"
-    end
-    
-    -- ⑦: 同一prerender tick内での多重実行防止
-    -- アクションが開始されたら、同じtick内では他のアクションを許可しない
-    if state.action_started_this_tick then
-        return false, "アクション実行中"
     end
     
     -- ディレイ判定 (②: special_delay_until に統一)
