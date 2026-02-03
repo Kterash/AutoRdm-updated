@@ -118,6 +118,9 @@ local state = {
     
     -- ③: 詠唱不可後コールバック（遅延設定のため）
     on_cast_fail_callback = nil,
+    
+    -- ③: 緊急ディレイ処理の重複実行防止フラグ
+    emergency_delay_applied = nil,
 }
 
 magic_judge.state = state

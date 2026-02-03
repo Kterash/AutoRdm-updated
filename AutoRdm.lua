@@ -2164,14 +2164,27 @@ windower.register_event('prerender', function()
     
     -- ③: タイムアウト後のディレイ設定を保証（第三の安全装置：最終防衛線）
     -- magic_judge が fail 判定を出したのにディレイが設定されていない場合は強制設定
+    -- 重要：last_resultは消費せず、通常のretryロジックで処理できるようにする
     if magic_judge and magic_judge.state then
-        if magic_judge.state.last_result == "fail" and magic_judge.state.last_result_src then
-            -- 失敗判定が出ているのにディレイが未来に設定されていない場合
+        local mjs = magic_judge.state
+        if mjs.last_result == "fail" and mjs.last_result_src then
+            -- 失敗判定が出ているが、ディレイが未来に設定されていない場合
+            -- かつ、まだ緊急処理を実行していない場合のみ
             if state.special_delay_until <= t then
-                -- 緊急でディレイを設定
-                state.special_delay_until = t + (DELAY_CONFIG and DELAY_CONFIG.cast_fail or 3.0)
-                windower.add_to_chat(123, '[AutoRdm] Emergency delay set after magic_judge failure')
+                -- この失敗結果に対して既に緊急処理を行ったかチェック
+                -- mjs.emergency_delay_applied が現在の source_set と一致していなければ未処理
+                if mjs.emergency_delay_applied ~= mjs.last_result_src then
+                    -- 緊急でディレイを設定
+                    state.special_delay_until = t + (DELAY_CONFIG and DELAY_CONFIG.cast_fail or 3.0)
+                    windower.add_to_chat(123, '[AutoRdm] Emergency delay set after magic_judge failure')
+                    
+                    -- このsource_setに対して緊急処理済みとマーク（繰り返し防止）
+                    mjs.emergency_delay_applied = mjs.last_result_src
+                end
             end
+        else
+            -- last_resultがクリアされたら緊急処理フラグもクリア
+            mjs.emergency_delay_applied = nil
         end
     end
 
