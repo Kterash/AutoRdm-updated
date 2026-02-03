@@ -2162,7 +2162,7 @@ windower.register_event('prerender', function()
         magic_judge.check_timeout() 
     end
     
-    -- ③: タイムアウト後のディレイ設定を保証（二重の安全装置）
+    -- ③: タイムアウト後のディレイ設定を保証（第三の安全装置：最終防衛線）
     -- magic_judge が fail 判定を出したのにディレイが設定されていない場合は強制設定
     if magic_judge and magic_judge.state then
         if magic_judge.state.last_result == "fail" and magic_judge.state.last_result_src then
@@ -2642,11 +2642,11 @@ end
 if magic_judge and magic_judge.state then
     magic_judge.state.on_cast_fail_callback = function(spell_name, source_set, reason)
         -- ③: 詠唱不可後ディレイを設定し、can_start_special に含める
-        -- このコールバックは必ず成功しなければならない（鉄壁のディレイ設定）
+        -- このコールバックは可能な限り成功を保証する（第一の安全装置）
         
         -- 安全なデフォルト値を使用
         local delay_time = (DELAY_CONFIG and DELAY_CONFIG.cast_fail) or 3.0
-        local current_time = (now and now()) or os.clock()
+        local current_time = (now and now()) or os.clock()  -- now() も os.clock() を返すため一貫性あり
         local new_delay = current_time + delay_time
         
         -- ディレイを設定（確実に設定されるように）
