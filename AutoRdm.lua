@@ -222,6 +222,9 @@ local function now()
 end
 
 local function send_cmd(str)
+    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+    -- コマンド送信時に設定することで、実際にアクションが実行される直前に確実にロック
+    state.action_started_this_tick = true
     windower.send_command(windower.to_shift_jis(str))
 end
 
@@ -941,10 +944,6 @@ local function process_buffs()
     if not ok then
         return
     end
-    
-    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
-    -- この時点でアクション実行が確定したため、他のアクションをブロック
-    state.action_started_this_tick = true
 
     local recasts = windower.ffxi.get_spell_recasts()
     if not recasts then return end
@@ -1051,9 +1050,6 @@ local function buffset_cast_next(list)
         state.buffset.next_time = now() + 0.5
         return
     end
-    
-    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
-    state.action_started_this_tick = true
 
     local spell = res.spells:with('ja', entry.name) or res.spells:with('en', entry.name)
     if spell and spell.recast_id and not can_cast(spell.recast_id) then
@@ -1315,8 +1311,6 @@ local function process_ws()
             end
             return
         end
-        -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
-        state.action_started_this_tick = true
         
         send_cmd(('input /ws "%s" <t>'):format(cfg.ws1))
         if ws_judge then ws_judge.start(cfg.ws1, "WS1") end
@@ -1337,8 +1331,6 @@ local function process_ws()
             end
             return
         end
-        -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
-        state.action_started_this_tick = true
         
         send_cmd(('input /ws "%s" <t>'):format(cfg.ws1))
         if ws_judge then ws_judge.start(cfg.ws1, "WS1") end
@@ -1530,10 +1522,6 @@ local function try_start_mb1(spell_name, target, opts)
             return true
         end
     end
-    
-    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
-    -- force_bypass の有無に関わらず、実行が確定した時点で設定
-    state.action_started_this_tick = true
 
     -- ①: MB セット開始時は WS/BUFFSET を中断
     if state.ws.active then
@@ -1589,9 +1577,6 @@ local function try_start_mb2(spell_name, target)
         log_msg('abort', '【MB】', spell_name, 'MB2 中止', reason or '実行不可')
         return false
     end
-    
-    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
-    state.action_started_this_tick = true
 
     state.last_spell = spell_name
 
@@ -2242,9 +2227,6 @@ windower.register_event('prerender', function()
     if state.combatbuff.pending and state.combatbuff.pending_spell then
         local ok, reason = can_start_special()
         if ok then
-            -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
-            state.action_started_this_tick = true
-            
             local sp = state.combatbuff.pending_spell
             local tgt = state.combatbuff.pending_target
             state.combatbuff.pending = false
@@ -2296,9 +2278,6 @@ windower.register_event('prerender', function()
     if state.queued_special.name and not state.current_special.name then
         local ok, reason = can_start_special()
         if ok then
-            -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
-            state.action_started_this_tick = true
-            
             local qs = state.queued_special
             local qname = qs.name
             local qrecast = qs.recast_id
