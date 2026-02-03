@@ -6,26 +6,54 @@ local ws_judge = {}
 ------------------------------------------------------------
 -- 成功 / 失敗メッセージ分類テーブル
 ------------------------------------------------------------
+
+-- 成功扱い（ダメージを与えた = 連携可能）
+-- ダメージを与えたWSのみ連携につながる
 local SUCCESS_WS = {
-    [185] = true,
+    -- 通常ダメージ
+    [185]=true, -- uses WS, damage
+    
+    -- レジストしてもダメージあり
+    [197]=true, -- uses WS, resists but damage
+    
+    -- ドレインWS（ダメージ + ドレイン効果）
+    [187]=true, -- uses WS, HP drained
+    [225]=true, -- uses WS, MP drained
+    [226]=true, -- uses WS, TP drained
+    
+    -- Magic Burst
+    [747]=true, -- uses WS, Magic Burst damage
+    [748]=true, -- uses WS, Magic Burst HP drain
+    [750]=true, -- uses WS, Magic Burst MP drain
+    [752]=true, -- uses WS, Magic Burst TP drain
 }
 
-FAIL_WS = {
-    [89]=true,   -- Unable to use weapon skill.
-    [90]=true,   -- Unable to use weapon skill.
-    [188]=true,  -- WS miss
-    [189]=true,  -- WS no effect
-    [190]=true,  -- Cannot use that weapon ability.
-    [191]=true,  -- Is unable to use weapon skills.
-    [192]=true,  -- Does not have enough TP.
-    [193]=true,  -- Cannot be used against that target.
-    [198]=true,  -- Target is too far away.
-    [203]=true,  -- Target is ${status}.
-    [217]=true,  -- You cannot see ${target}.
-    [218]=true,  -- You move and interrupt your aim.
-    [219]=true,  -- You cannot see ${target}.
-    [220]=true,  -- You move and interrupt your aim.
-    [328]=true,  -- Target is too far away. (別ID)
+-- 失敗扱い（ミス・ダメージ0・実行できない）
+local FAIL_WS = {
+    -- WS実行不可
+    [89]=true,  -- Unable to use weapon skill
+    [90]=true,  -- Unable to use weapon skill
+    [190]=true, -- cannot use that weapon ability
+    [191]=true, -- unable to use weapon skills
+    [192]=true, -- not enough TP
+    
+    -- ミス・無効
+    [188]=true, -- uses WS, misses
+    [189]=true, -- uses WS, no effect
+    [193]=true, -- WS cannot be used against target
+    
+    -- 距離・視線
+    [198]=true, -- target is too far away
+    [328]=true, -- target is too far away
+    [217]=true, -- cannot see target
+    [219]=true, -- cannot see target
+    
+    -- 照準中断（遠隔・射撃WS用）
+    [218]=true, -- move and interrupt aim
+    [220]=true, -- move and interrupt aim
+    
+    -- ターゲット状態
+    [203]=true, -- target is status
 }
 
 ------------------------------------------------------------

@@ -1195,7 +1195,9 @@ ws_set_off = function(suppress_log)
     w.logged_reservation = false
     w.retry_wait_logged = false
 
-    if magic_judge and magic_judge.state then
+    if magic_judge and magic_judge.safe_reset then
+        magic_judge.safe_reset("ws_set_off")
+    elseif magic_judge and magic_judge.state then
         magic_judge.state.active = false
         magic_judge.state.last_result = nil
         magic_judge.state.last_result_src = nil
@@ -2598,8 +2600,10 @@ function reset_all_states()
 
     state.first_hit_done = false
 
-    -- magic_judge も明示的にリセット
-    if magic_judge and magic_judge.state then
+    -- magic_judge も明示的にリセット（コールバック付き）
+    if magic_judge and magic_judge.safe_reset then
+        magic_judge.safe_reset("reset_all_states")
+    elseif magic_judge and magic_judge.state then
         magic_judge.state.active = false
         magic_judge.state.last_result = nil
         magic_judge.state.last_result_src = nil
@@ -2618,8 +2622,17 @@ if magic_judge and magic_judge.state then
     magic_judge.state.on_cast_fail_callback = function(spell_name, source_set, reason)
         -- ③: 詠唱不可後ディレイを設定し、can_start_special に含める
         local delay_time = DELAY_CONFIG.cast_fail
-        state.special_delay_until = now() + delay_time
-        log_msg('abort', string.format('【%s】', source_set or 'unknown'), spell_name or '', '詠唱不可', string.format('%s (ディレイ%.1f秒設定)', reason or '', delay_time))
+        local current_time = now()
+        local new_delay = current_time + delay_time
+        
+        -- ディレイを設定（確実に設定されるように）
+        state.special_delay_until = new_delay
+        
+        -- ログ出力（タイムスタンプ付き）
+        local reason_text = reason or ''
+        local delay_info = string.format('ディレイ%.1f秒設定 %.2f→%.2f', delay_time, current_time, new_delay)
+        local msg = string.format('%s (%s)', reason_text, delay_info)
+        log_msg('abort', string.format('【%s】', source_set or 'unknown'), spell_name or '', '詠唱不可', msg)
     end
 end
 
