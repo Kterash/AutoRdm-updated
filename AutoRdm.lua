@@ -1529,9 +1529,11 @@ local function try_start_mb1(spell_name, target, opts)
             log_msg('notice', '【MB】', spell_name, '予約')
             return true
         end
-        -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
-        state.action_started_this_tick = true
     end
+    
+    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+    -- force_bypass の有無に関わらず、実行が確定した時点で設定
+    state.action_started_this_tick = true
 
     -- ①: MB セット開始時は WS/BUFFSET を中断
     if state.ws.active then
