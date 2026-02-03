@@ -5,7 +5,7 @@
 
 _addon.name     = 'AutoRdm'
 _addon.author   = 'Kazuhiro+Copilot'
-_addon.version  = '5.38'
+_addon.version  = '5.39'
 _addon.commands = {'ardm'}
 
 ------------------------------------------------------------
@@ -393,6 +393,9 @@ local state = {
     ws_motion_start     = nil,
     ws_delay_until      = 0,
     special_delay_until = 0, -- ②: magic_delay_until を廃止し special_delay_until に統一
+    
+    -- ⑦: 同一prerender tick内での多重実行を防止するフラグ
+    action_started_this_tick = false,
 
     suspend_buffs    = false,
     buff_resume_time = 0,
@@ -474,8 +477,15 @@ local DELAY_CONFIG = {
 -- can_start_special（スペシャル実行ロック判定）
 -- ②: 詠唱中判定を magic_judge.state.active に統一
 -- ⑤: 全魔法・WSの実行前に必ず参照
+-- ⑦: 同一prerender tick内での多重実行を防止
 ------------------------------------------------------------
 local function can_start_special()
+    -- ⑦: 同一prerender tick内での多重実行防止（早期リターンで効率化）
+    -- アクションが開始されたら、同じtick内では他のアクションを許可しない
+    if state.action_started_this_tick then
+        return false, "アクション実行中"
+    end
+    
     -- WS実行中判定
     if state.ws_motion then
         return false, "WSモーション中"
@@ -680,6 +690,8 @@ local function cast_spell(spell, target, opts)
         end
     end
 
+    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+    state.action_started_this_tick = true
     send_cmd(('input /ma "%s" %s'):format(spell.name, target or '<me>'))
     return true
 end
@@ -713,6 +725,8 @@ local function cast_spell_combatbuff(spell, target)
     -- ②: combatbuff も magic_judge でモニタリング
     magic_judge.start(spell.name, 'combatbuff')
     
+    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+    state.action_started_this_tick = true
     send_cmd(('input /ma "%s" %s'):format(spell.name, target or '<me>'))
     return true
 end
@@ -752,6 +766,8 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
     end
 
     if is_sleep2 and target == '<stnpc>' then
+        -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+        state.action_started_this_tick = true
         send_cmd(('input /ma "%s" <stnpc>'):format(name))
         state.sleep2_initial = true
         state.sleep2_waiting_for_confirm = true
@@ -830,6 +846,8 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
 
     magic_judge.start(name, "special")
 
+    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+    state.action_started_this_tick = true
     send_cmd(('input /ma "%s" %s'):format(name, target))
 end
 
@@ -1298,6 +1316,9 @@ local function process_ws()
             end
             return
         end
+        
+        -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+        state.action_started_this_tick = true
         send_cmd(('input /ws "%s" <t>'):format(cfg.ws1))
         if ws_judge then ws_judge.start(cfg.ws1, "WS1") end
         w.phase = 'ws1_wait'
@@ -1317,6 +1338,9 @@ local function process_ws()
             end
             return
         end
+        
+        -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+        state.action_started_this_tick = true
         send_cmd(('input /ws "%s" <t>'):format(cfg.ws1))
         if ws_judge then ws_judge.start(cfg.ws1, "WS1") end
         w.phase = 'ws1_wait'
@@ -1336,6 +1360,8 @@ local function process_ws()
             return
         end
 
+        -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+        state.action_started_this_tick = true
         send_cmd(('input /ws "%s" <t>'):format(cfg.ws2))
         if ws_judge then ws_judge.start(cfg.ws2, "WS2") end
         w.phase = 'ws2_wait'
@@ -1537,6 +1563,8 @@ local function try_start_mb1(spell_name, target, opts)
     -- ②: magic_judge でモニタリング開始
     magic_judge.start(spell_name, 'mbset')
     
+    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+    state.action_started_this_tick = true
     send_cmd(('input /ma "%s" %s'):format(spell_name, target))
     log_msg('report', '【MB】', spell_name, 'MB1 詠唱開始')
 
@@ -1574,6 +1602,8 @@ local function try_start_mb2(spell_name, target)
     -- ②: magic_judge でモニタリング開始
     magic_judge.start(spell_name, 'mbset')
 
+    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+    state.action_started_this_tick = true
     send_cmd(('input /ma "%s" %s'):format(spell_name, target))
     log_msg('report', '【MB】', spell_name, 'MB2 詠唱開始')
     return true
@@ -2130,6 +2160,9 @@ windower.register_event('prerender', function()
     end
     state.last_prerender_tick = t
     state.last_prerender_time = t
+    
+    -- ⑦: 新しいprerender tickの開始時にアクションロックをリセット
+    state.action_started_this_tick = false
 
     -- 戦闘終了遷移 (前回 in-combat -> 今回 not in-combat) を先に処理
     local prev_status = state.last_player_status
