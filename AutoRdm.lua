@@ -463,7 +463,7 @@ local DELAY_CONFIG = {
     -- スペシャル魔法完了後のディレイ
     special_complete = 3.0,
     -- 魔法詠唱不可時のディレイ (③ 詠唱不可後ディレイ)
-    cast_fail = 1.5,
+    cast_fail = 3.0,
     -- 戦闘バフ完了後のインターバル (⑥e)
     combatbuff_interval = 6.0,
     -- MB2発動タイミング (⑥b-2: MB1発動3秒後)
