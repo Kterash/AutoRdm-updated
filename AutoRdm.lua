@@ -1195,7 +1195,9 @@ ws_set_off = function(suppress_log)
     w.logged_reservation = false
     w.retry_wait_logged = false
 
-    if magic_judge and magic_judge.state then
+    if magic_judge and magic_judge.safe_reset then
+        magic_judge.safe_reset("ws_set_off")
+    elseif magic_judge and magic_judge.state then
         magic_judge.state.active = false
         magic_judge.state.last_result = nil
         magic_judge.state.last_result_src = nil
@@ -2598,8 +2600,10 @@ function reset_all_states()
 
     state.first_hit_done = false
 
-    -- magic_judge も明示的にリセット
-    if magic_judge and magic_judge.state then
+    -- magic_judge も明示的にリセット（コールバック付き）
+    if magic_judge and magic_judge.safe_reset then
+        magic_judge.safe_reset("reset_all_states")
+    elseif magic_judge and magic_judge.state then
         magic_judge.state.active = false
         magic_judge.state.last_result = nil
         magic_judge.state.last_result_src = nil

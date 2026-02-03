@@ -294,4 +294,24 @@ function magic_judge.consume_result_for(source_set)
     return nil
 end
 
+------------------------------------------------------------
+-- 安全なリセット（コールバック実行後にクリア）
+------------------------------------------------------------
+function magic_judge.safe_reset(reason)
+    if state.active then
+        -- アクティブな監視がある場合はコールバックを呼ぶ
+        if state.on_cast_fail_callback then
+            state.on_cast_fail_callback(state.spell_name, state.source_set, reason or "forced_reset")
+        end
+        
+        state.active = false
+        state.last_result = "fail"
+        state.last_result_src = state.source_set
+    end
+    
+    -- 結果もクリア
+    state.last_result = nil
+    state.last_result_src = nil
+end
+
 return magic_judge
