@@ -222,9 +222,6 @@ local function now()
 end
 
 local function send_cmd(str)
-    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
-    -- コマンド送信時に設定することで、実際にアクションが実行される直前に確実にロック
-    state.action_started_this_tick = true
     windower.send_command(windower.to_shift_jis(str))
 end
 
@@ -693,6 +690,8 @@ local function cast_spell(spell, target, opts)
         end
     end
 
+    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+    state.action_started_this_tick = true
     send_cmd(('input /ma "%s" %s'):format(spell.name, target or '<me>'))
     return true
 end
@@ -726,6 +725,8 @@ local function cast_spell_combatbuff(spell, target)
     -- ②: combatbuff も magic_judge でモニタリング
     magic_judge.start(spell.name, 'combatbuff')
     
+    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+    state.action_started_this_tick = true
     send_cmd(('input /ma "%s" %s'):format(spell.name, target or '<me>'))
     return true
 end
@@ -765,6 +766,8 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
     end
 
     if is_sleep2 and target == '<stnpc>' then
+        -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+        state.action_started_this_tick = true
         send_cmd(('input /ma "%s" <stnpc>'):format(name))
         state.sleep2_initial = true
         state.sleep2_waiting_for_confirm = true
@@ -843,6 +846,8 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
 
     magic_judge.start(name, "special")
 
+    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+    state.action_started_this_tick = true
     send_cmd(('input /ma "%s" %s'):format(name, target))
 end
 
@@ -1312,6 +1317,8 @@ local function process_ws()
             return
         end
         
+        -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+        state.action_started_this_tick = true
         send_cmd(('input /ws "%s" <t>'):format(cfg.ws1))
         if ws_judge then ws_judge.start(cfg.ws1, "WS1") end
         w.phase = 'ws1_wait'
@@ -1332,6 +1339,8 @@ local function process_ws()
             return
         end
         
+        -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+        state.action_started_this_tick = true
         send_cmd(('input /ws "%s" <t>'):format(cfg.ws1))
         if ws_judge then ws_judge.start(cfg.ws1, "WS1") end
         w.phase = 'ws1_wait'
@@ -1351,6 +1360,8 @@ local function process_ws()
             return
         end
 
+        -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+        state.action_started_this_tick = true
         send_cmd(('input /ws "%s" <t>'):format(cfg.ws2))
         if ws_judge then ws_judge.start(cfg.ws2, "WS2") end
         w.phase = 'ws2_wait'
@@ -1552,6 +1563,8 @@ local function try_start_mb1(spell_name, target, opts)
     -- ②: magic_judge でモニタリング開始
     magic_judge.start(spell_name, 'mbset')
     
+    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+    state.action_started_this_tick = true
     send_cmd(('input /ma "%s" %s'):format(spell_name, target))
     log_msg('report', '【MB】', spell_name, 'MB1 詠唱開始')
 
@@ -1589,6 +1602,8 @@ local function try_start_mb2(spell_name, target)
     -- ②: magic_judge でモニタリング開始
     magic_judge.start(spell_name, 'mbset')
 
+    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+    state.action_started_this_tick = true
     send_cmd(('input /ma "%s" %s'):format(spell_name, target))
     log_msg('report', '【MB】', spell_name, 'MB2 詠唱開始')
     return true
