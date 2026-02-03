@@ -64,7 +64,7 @@ local SUCCESS_CAST = {
 
 -- ① 詠唱不可 / ② 詠唱中断
 local FAIL_CAST = {
-    [16]=true, [68]=true, [313]=true,
+    [16]=true, [17]=true, [18]=true, [68]=true, [313]=true,
 
     [34]=true, [35]=true, [49]=true,
     [4]=true, [78]=true, [154]=true, [198]=true, [328]=true,
