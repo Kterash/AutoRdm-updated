@@ -674,6 +674,13 @@ local function cast_spell(spell, target, opts)
     -- これにより同一prerender内で後続の魔法が実行されるのを防ぐ
     state.special_delay_until = now() + DELAY_CONFIG.cast_fail
 
+    -- combatbuff tracking: Set tracking fields before casting
+    if kind == 'combatbuff' then
+        state.combatbuff.active = true
+        state.combatbuff.spell_name = spell.name
+        state.combatbuff.target = target or '<me>'
+    end
+
     -- ②: 全ての魔法を magic_judge でモニタリング開始
     magic_judge.start(spell.name, source_set)
     
@@ -699,51 +706,6 @@ local function cast_spell(spell, target, opts)
     state.action_started_this_tick = true
     send_cmd(('input /ma "%s" %s'):format(spell.name, target or '<me>'))
     return true
-end
-
-------------------------------------------------------------
--- 戦闘バフ専用 cast_spell
--- ②: combatbuff も magic_judge を通すように変更
--- ⑥e: 優先度 5（自動戦闘バフ）
--- ③: 詠唱不可リスクに備えて送信前にディレイ設定
--- Refactored to use cast_spell with combatbuff parameters
-------------------------------------------------------------
-local function cast_spell_combatbuff(spell, target)
-    if spell.recast_id and not can_cast(spell.recast_id) then
-        return false
-    end
-
-    -- ⑤: can_start_special を確認
-    local ok, reason = can_start_special()
-    if not ok then
-        state.combatbuff.pending = true
-        state.combatbuff.pending_spell = spell
-        state.combatbuff.pending_target = target or '<me>'
-        state.combatbuff.pending_priority = 5 -- ⑥e: 自動戦闘バフの優先度
-        log_msg('notice', '【auto】', spell.name, '予約')
-        return true
-    end
-
-    -- Set combatbuff tracking fields before casting
-    state.combatbuff.active = true
-    state.combatbuff.spell_name = spell.name
-    state.combatbuff.target = target or '<me>'
-
-    -- Call cast_spell with combatbuff parameters
-    local success, err = cast_spell(spell, target, {
-        kind = 'combatbuff',
-        source_set = 'combatbuff',
-        priority = 5
-    })
-    
-    if not success then
-        -- If cast_spell fails, clear tracking fields
-        state.combatbuff.active = false
-        state.combatbuff.spell_name = nil
-        state.combatbuff.target = nil
-    end
-    
-    return success
 end
 
 ------------------------------------------------------------
@@ -977,18 +939,36 @@ local function process_buffs()
 
             if ni_rc == 0 then
                 state.combatbuff.last_finish_time = now()
-                if cast_spell_combatbuff(spells.utsu_ni, '<me>') then
+                local success = cast_spell(spells.utsu_ni, '<me>', {
+                    kind = 'combatbuff',
+                    source_set = 'combatbuff',
+                    priority = 5
+                })
+                if success then
                     log_msg('start', '【auto】', '空蝉:弐', '詠唱開始')
                 else
                     log_msg('abort', '【auto】', '空蝉:弐', '詠唱不可')
+                    -- Clear tracking fields on failure
+                    state.combatbuff.active = false
+                    state.combatbuff.spell_name = nil
+                    state.combatbuff.target = nil
                 end
                 return
             elseif ichi_rc == 0 then
                 state.combatbuff.last_finish_time = now()
-                if cast_spell_combatbuff(spells.utsu_ichi, '<me>') then
+                local success = cast_spell(spells.utsu_ichi, '<me>', {
+                    kind = 'combatbuff',
+                    source_set = 'combatbuff',
+                    priority = 5
+                })
+                if success then
                     log_msg('start', '【auto】', '空蝉:壱', '詠唱開始')
                 else
                     log_msg('abort', '【auto】', '空蝉:壱', '詠唱不可')
+                    -- Clear tracking fields on failure
+                    state.combatbuff.active = false
+                    state.combatbuff.spell_name = nil
+                    state.combatbuff.target = nil
                 end
                 return
             else
@@ -1000,10 +980,19 @@ local function process_buffs()
     -- ストンスキン
     if not has_buff(37) and can_cast(spells.stoneskin.recast_id) then
         state.combatbuff.last_finish_time = now()
-        if cast_spell_combatbuff(spells.stoneskin, '<me>') then
+        local success = cast_spell(spells.stoneskin, '<me>', {
+            kind = 'combatbuff',
+            source_set = 'combatbuff',
+            priority = 5
+        })
+        if success then
             log_msg('start', '【auto】', 'ストンスキン', '詠唱開始')
         else
             log_msg('abort', '【auto】', 'ストンスキン', '詠唱不可')
+            -- Clear tracking fields on failure
+            state.combatbuff.active = false
+            state.combatbuff.spell_name = nil
+            state.combatbuff.target = nil
         end
         return
     end
@@ -1011,10 +1000,19 @@ local function process_buffs()
     -- ケアルIV
     if p.vitals.hpp <= 60 and can_cast(spells.cure4.recast_id) then
         state.combatbuff.last_finish_time = now()
-        if cast_spell_combatbuff(spells.cure4, '<me>') then
+        local success = cast_spell(spells.cure4, '<me>', {
+            kind = 'combatbuff',
+            source_set = 'combatbuff',
+            priority = 5
+        })
+        if success then
             log_msg('start', '【auto】', 'ケアルIV', '詠唱開始')
         else
             log_msg('abort', '【auto】', 'ケアルIV', '詠唱不可')
+            -- Clear tracking fields on failure
+            state.combatbuff.active = false
+            state.combatbuff.spell_name = nil
+            state.combatbuff.target = nil
         end
         return
     end
@@ -2271,10 +2269,19 @@ windower.register_event('prerender', function()
             state.combatbuff.pending_spell = nil
             state.combatbuff.pending_target = nil
 
-            if cast_spell_combatbuff(sp, tgt) then
+            local success = cast_spell(sp, tgt, {
+                kind = 'combatbuff',
+                source_set = 'combatbuff',
+                priority = 5
+            })
+            if success then
                 log_msg('report', '【auto】', sp.name, '予約実行')
             else
                 log_msg('abort', '【auto】', sp.name, '予約実行失敗')
+                -- Clear tracking fields on failure
+                state.combatbuff.active = false
+                state.combatbuff.spell_name = nil
+                state.combatbuff.target = nil
             end
         end
     end
