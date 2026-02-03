@@ -385,6 +385,11 @@ local state = {
         pending_spell    = nil,
         pending_target   = nil,
         pending_priority = nil, -- 新規: 予約の優先度
+        
+        -- combatbuff casting tracking
+        active           = false,
+        spell_name       = nil,
+        target           = nil,
     },
 
     buffset_last_finish_time = 0,
@@ -701,6 +706,7 @@ end
 -- ②: combatbuff も magic_judge を通すように変更
 -- ⑥e: 優先度 5（自動戦闘バフ）
 -- ③: 詠唱不可リスクに備えて送信前にディレイ設定
+-- Refactored to use cast_spell with combatbuff parameters
 ------------------------------------------------------------
 local function cast_spell_combatbuff(spell, target)
     if spell.recast_id and not can_cast(spell.recast_id) then
@@ -718,17 +724,26 @@ local function cast_spell_combatbuff(spell, target)
         return true
     end
 
-    -- ③: 詠唱不可リスクに備えて送信前にディレイを設定
-    -- これにより同一prerender内で後続の魔法が実行されるのを防ぐ
-    state.special_delay_until = now() + DELAY_CONFIG.cast_fail
+    -- Set combatbuff tracking fields before casting
+    state.combatbuff.active = true
+    state.combatbuff.spell_name = spell.name
+    state.combatbuff.target = target or '<me>'
+
+    -- Call cast_spell with combatbuff parameters
+    local success, err = cast_spell(spell, target, {
+        kind = 'combatbuff',
+        source_set = 'combatbuff',
+        priority = 5
+    })
     
-    -- ②: combatbuff も magic_judge でモニタリング
-    magic_judge.start(spell.name, 'combatbuff')
+    if not success then
+        -- If cast_spell fails, clear tracking fields
+        state.combatbuff.active = false
+        state.combatbuff.spell_name = nil
+        state.combatbuff.target = nil
+    end
     
-    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
-    state.action_started_this_tick = true
-    send_cmd(('input /ma "%s" %s'):format(spell.name, target or '<me>'))
-    return true
+    return success
 end
 
 ------------------------------------------------------------
@@ -2110,16 +2125,6 @@ local function handle_spell_finish(act)
     end
 
     state.last_spell = nil
-
-    -- ⑥e: 戦闘バフ完了後は独自のインターバル6秒をとる
-    -- ②: combatbuff.casting は廃止されているが、判定に magic_judge のsource_setを使用
-    local judge_result = magic_judge.consume_result_for('combatbuff')
-    if judge_result then
-        state.combatbuff.last_finish_time = now()
-        if not state.ws.active then
-            log_msg('finish', '【auto】', name, '詠唱完了')
-        end
-    end
 end
 
 windower.register_event('action', handle_spell_finish)
@@ -2240,6 +2245,25 @@ windower.register_event('prerender', function()
         magic_judge.check_mp()
     end
 
+    -- Consume magic_judge results for combatbuff
+    if state.combatbuff.active then
+        local result = magic_judge and magic_judge.consume_result_for and magic_judge.consume_result_for('combatbuff')
+        if result then
+            -- Clear tracking fields and set last_finish_time
+            state.combatbuff.active = false
+            local spell_name = state.combatbuff.spell_name or '戦闘バフ'
+            state.combatbuff.spell_name = nil
+            state.combatbuff.target = nil
+            state.combatbuff.last_finish_time = now()
+            
+            if result == "success" then
+                log_msg('finish', '【auto】', spell_name, '詠唱完了')
+            elseif result == "fail" then
+                log_msg('abort', '【auto】', spell_name, '詠唱失敗')
+            end
+        end
+    end
+
     -- 戦闘バフ予約実行
     if state.combatbuff.pending and state.combatbuff.pending_spell then
         local ok, reason = can_start_special()
@@ -2265,6 +2289,14 @@ windower.register_event('prerender', function()
         magic_judge.state.active = false
         magic_judge.state.last_result = "fail"
         magic_judge.state.last_result_src = magic_judge.state.source_set
+        
+        -- Clear combatbuff state if it was a combatbuff cast
+        if magic_judge.state.source_set == 'combatbuff' and state.combatbuff.active then
+            state.combatbuff.active = false
+            state.combatbuff.spell_name = nil
+            state.combatbuff.target = nil
+        end
+        
         reset_retry()
     end
 
@@ -2595,6 +2627,10 @@ function reset_all_states()
     state.combatbuff.pending_spell = nil
     state.combatbuff.pending_target = nil
     state.combatbuff.pending_priority = nil
+    
+    state.combatbuff.active = false
+    state.combatbuff.spell_name = nil
+    state.combatbuff.target = nil
 
     state.buffset_last_finish_time = 0
 
