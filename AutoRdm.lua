@@ -393,6 +393,9 @@ local state = {
     ws_motion_start     = nil,
     ws_delay_until      = 0,
     special_delay_until = 0, -- ②: magic_delay_until を廃止し special_delay_until に統一
+    
+    -- ⑦: 同一prerender tick内での多重実行を防止するフラグ
+    action_started_this_tick = false,
 
     suspend_buffs    = false,
     buff_resume_time = 0,
@@ -474,6 +477,7 @@ local DELAY_CONFIG = {
 -- can_start_special（スペシャル実行ロック判定）
 -- ②: 詠唱中判定を magic_judge.state.active に統一
 -- ⑤: 全魔法・WSの実行前に必ず参照
+-- ⑦: 同一prerender tick内での多重実行を防止
 ------------------------------------------------------------
 local function can_start_special()
     -- WS実行中判定
@@ -487,6 +491,12 @@ local function can_start_special()
     -- 魔法詠唱中判定 (②: magic_judge.state.active に統一)
     if magic_judge and magic_judge.state and magic_judge.state.active then
         return false, "魔法判定中"
+    end
+    
+    -- ⑦: 同一prerender tick内での多重実行防止
+    -- アクションが開始されたら、同じtick内では他のアクションを許可しない
+    if state.action_started_this_tick then
+        return false, "アクション実行中"
     end
     
     -- ディレイ判定 (②: special_delay_until に統一)
@@ -931,6 +941,10 @@ local function process_buffs()
     if not ok then
         return
     end
+    
+    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+    -- この時点でアクション実行が確定したため、他のアクションをブロック
+    state.action_started_this_tick = true
 
     local recasts = windower.ffxi.get_spell_recasts()
     if not recasts then return end
@@ -1298,6 +1312,9 @@ local function process_ws()
             end
             return
         end
+        -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+        state.action_started_this_tick = true
+        
         send_cmd(('input /ws "%s" <t>'):format(cfg.ws1))
         if ws_judge then ws_judge.start(cfg.ws1, "WS1") end
         w.phase = 'ws1_wait'
@@ -1317,6 +1334,9 @@ local function process_ws()
             end
             return
         end
+        -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+        state.action_started_this_tick = true
+        
         send_cmd(('input /ws "%s" <t>'):format(cfg.ws1))
         if ws_judge then ws_judge.start(cfg.ws1, "WS1") end
         w.phase = 'ws1_wait'
@@ -2130,6 +2150,9 @@ windower.register_event('prerender', function()
     end
     state.last_prerender_tick = t
     state.last_prerender_time = t
+    
+    -- ⑦: 新しいprerender tickの開始時にアクションロックをリセット
+    state.action_started_this_tick = false
 
     -- 戦闘終了遷移 (前回 in-combat -> 今回 not in-combat) を先に処理
     local prev_status = state.last_player_status
@@ -2209,6 +2232,9 @@ windower.register_event('prerender', function()
     if state.combatbuff.pending and state.combatbuff.pending_spell then
         local ok, reason = can_start_special()
         if ok then
+            -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+            state.action_started_this_tick = true
+            
             local sp = state.combatbuff.pending_spell
             local tgt = state.combatbuff.pending_target
             state.combatbuff.pending = false
@@ -2260,6 +2286,9 @@ windower.register_event('prerender', function()
     if state.queued_special.name and not state.current_special.name then
         local ok, reason = can_start_special()
         if ok then
+            -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+            state.action_started_this_tick = true
+            
             local qs = state.queued_special
             local qname = qs.name
             local qrecast = qs.recast_id
