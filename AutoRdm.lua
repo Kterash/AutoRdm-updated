@@ -2247,11 +2247,13 @@ windower.register_event('prerender', function()
 
     -- Consume magic_judge results for combatbuff
     if state.combatbuff.active then
-        local result = magic_judge and magic_judge.consume_result_for and magic_judge.consume_result_for('combatbuff')
+        local result = magic_judge.consume_result_for('combatbuff')
         if result then
+            -- Capture spell_name before clearing state
+            local spell_name = state.combatbuff.spell_name
+            
             -- Clear tracking fields and set last_finish_time
             state.combatbuff.active = false
-            local spell_name = state.combatbuff.spell_name or '戦闘バフ'
             state.combatbuff.spell_name = nil
             state.combatbuff.target = nil
             state.combatbuff.last_finish_time = now()
