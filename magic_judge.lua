@@ -305,11 +305,9 @@ function magic_judge.safe_reset(reason)
         end
         
         state.active = false
-        state.last_result = "fail"
-        state.last_result_src = state.source_set
     end
     
-    -- 結果もクリア
+    -- 結果をクリア
     state.last_result = nil
     state.last_result_src = nil
 end
