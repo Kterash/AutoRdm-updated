@@ -1828,13 +1828,8 @@ windower.register_event('action', function(act)
         return
     end
 
-    if act.actor_id == p.id and act.category == 6 then
-        -- magic_judge が監視中の場合のみ記録。そうでなければ magic_judge が判定するまで待つ。
-        if magic_judge and magic_judge.state and magic_judge.state.active then
-            log_msg('abort', '【magic】', '魔法', '詠唱中断')
-            state.special_delay_until = now() + DELAY_CONFIG.magic_complete
-        end
-    end
+    -- Category 6 (interruption) is handled by magic_judge through message detection
+    -- AutoRdm should not judge interruptions directly; it receives fail results from magic_judge
 
     if act.actor_id == p.id and act.category == 7 then
         state.ws_motion = true
