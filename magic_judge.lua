@@ -154,7 +154,12 @@ function magic_judge.check_timeout()
         
         -- ③: 詠唱不可後コールバック実行
         if state.on_cast_fail_callback then
-            state.on_cast_fail_callback(state.spell_name, state.source_set, "timeout")
+            -- タイムアウト時のコールバックは必ず実行（pcall でエラーハンドリング）
+            local success, err = pcall(state.on_cast_fail_callback, state.spell_name, state.source_set, "timeout")
+            if not success then
+                -- エラーが発生してもログに記録
+                windower.add_to_chat(123, '[magic_judge] Callback error: ' .. tostring(err))
+            end
         end
     end
 end
@@ -236,7 +241,10 @@ function magic_judge.on_action(act)
         -- 注: これは魔法が発動したが失敗した場合（レジスト、中断等）
         -- 魔法が発動しない「詠唱不可」の場合はincoming chunkで検出される
         if state.on_cast_fail_callback then
-            state.on_cast_fail_callback(state.spell_name, state.source_set, "action_fail")
+            local success, err = pcall(state.on_cast_fail_callback, state.spell_name, state.source_set, "action_fail")
+            if not success then
+                windower.add_to_chat(123, '[magic_judge] Callback error (action_fail): ' .. tostring(err))
+            end
         end
         
         return
@@ -272,7 +280,10 @@ windower.register_event('incoming chunk', function(id, data)
         
         -- ③: 詠唱不可後コールバック実行
         if state.on_cast_fail_callback then
-            state.on_cast_fail_callback(state.spell_name, state.source_set, "incoming_chunk")
+            local success, err = pcall(state.on_cast_fail_callback, state.spell_name, state.source_set, "incoming_chunk")
+            if not success then
+                windower.add_to_chat(123, '[magic_judge] Callback error (incoming_chunk): ' .. tostring(err))
+            end
         end
     end
 end)
@@ -301,7 +312,10 @@ function magic_judge.safe_reset(reason)
     if state.active then
         -- アクティブな監視がある場合はコールバックを呼ぶ
         if state.on_cast_fail_callback then
-            state.on_cast_fail_callback(state.spell_name, state.source_set, reason or "forced_reset")
+            local success, err = pcall(state.on_cast_fail_callback, state.spell_name, state.source_set, reason or "forced_reset")
+            if not success then
+                windower.add_to_chat(123, '[magic_judge] Callback error (safe_reset): ' .. tostring(err))
+            end
         end
         
         state.active = false

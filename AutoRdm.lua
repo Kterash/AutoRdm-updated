@@ -2622,8 +2622,14 @@ if magic_judge and magic_judge.state then
     magic_judge.state.on_cast_fail_callback = function(spell_name, source_set, reason)
         -- ③: 詠唱不可後ディレイを設定し、can_start_special に含める
         local delay_time = DELAY_CONFIG.cast_fail
-        state.special_delay_until = now() + delay_time
-        log_msg('abort', string.format('【%s】', source_set or 'unknown'), spell_name or '', '詠唱不可', string.format('%s (ディレイ%.1f秒設定)', reason or '', delay_time))
+        local current_time = now()
+        local new_delay = current_time + delay_time
+        
+        -- ディレイを設定（確実に設定されるように）
+        state.special_delay_until = new_delay
+        
+        -- ログ出力
+        log_msg('abort', string.format('【%s】', source_set or 'unknown'), spell_name or '', '詠唱不可', string.format('%s (ディレイ%.1f秒設定 %.2f→%.2f)', reason or '', delay_time, current_time, new_delay))
     end
 end
 
