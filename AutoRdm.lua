@@ -1051,6 +1051,9 @@ local function buffset_cast_next(list)
         state.buffset.next_time = now() + 0.5
         return
     end
+    
+    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+    state.action_started_this_tick = true
 
     local spell = res.spells:with('ja', entry.name) or res.spells:with('en', entry.name)
     if spell and spell.recast_id and not can_cast(spell.recast_id) then
@@ -1526,6 +1529,8 @@ local function try_start_mb1(spell_name, target, opts)
             log_msg('notice', '【MB】', spell_name, '予約')
             return true
         end
+        -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+        state.action_started_this_tick = true
     end
 
     -- ①: MB セット開始時は WS/BUFFSET を中断
@@ -1582,6 +1587,9 @@ local function try_start_mb2(spell_name, target)
         log_msg('abort', '【MB】', spell_name, 'MB2 中止', reason or '実行不可')
         return false
     end
+    
+    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
+    state.action_started_this_tick = true
 
     state.last_spell = spell_name
 
