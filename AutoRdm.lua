@@ -2161,6 +2161,19 @@ windower.register_event('prerender', function()
     if magic_judge and magic_judge.state and magic_judge.check_timeout then 
         magic_judge.check_timeout() 
     end
+    
+    -- ③: タイムアウト後のディレイ設定を保証（二重の安全装置）
+    -- magic_judge が fail 判定を出したのにディレイが設定されていない場合は強制設定
+    if magic_judge and magic_judge.state then
+        if magic_judge.state.last_result == "fail" and magic_judge.state.last_result_src then
+            -- 失敗判定が出ているのにディレイが未来に設定されていない場合
+            if state.special_delay_until <= t then
+                -- 緊急でディレイを設定
+                state.special_delay_until = t + (DELAY_CONFIG and DELAY_CONFIG.cast_fail or 3.0)
+                windower.add_to_chat(123, '[AutoRdm] Emergency delay set after magic_judge failure')
+            end
+        end
+    end
 
     if not state.enabled then return end
     local p = get_player()
@@ -2629,18 +2642,27 @@ end
 if magic_judge and magic_judge.state then
     magic_judge.state.on_cast_fail_callback = function(spell_name, source_set, reason)
         -- ③: 詠唱不可後ディレイを設定し、can_start_special に含める
-        local delay_time = DELAY_CONFIG.cast_fail
-        local current_time = now()
+        -- このコールバックは必ず成功しなければならない（鉄壁のディレイ設定）
+        
+        -- 安全なデフォルト値を使用
+        local delay_time = (DELAY_CONFIG and DELAY_CONFIG.cast_fail) or 3.0
+        local current_time = (now and now()) or os.clock()
         local new_delay = current_time + delay_time
         
         -- ディレイを設定（確実に設定されるように）
-        state.special_delay_until = new_delay
+        if state then
+            state.special_delay_until = new_delay
+        else
+            windower.add_to_chat(123, '[magic_judge] CRITICAL: state not available, cannot set delay!')
+        end
         
         -- ログ出力（タイムスタンプ付き）
-        local reason_text = reason or ''
-        local delay_info = string.format('ディレイ%.1f秒設定 %.2f→%.2f', delay_time, current_time, new_delay)
-        local msg = string.format('%s (%s)', reason_text, delay_info)
-        log_msg('abort', string.format('【%s】', source_set or 'unknown'), spell_name or '', '詠唱不可', msg)
+        if log_msg then
+            local reason_text = reason or ''
+            local delay_info = string.format('ディレイ%.1f秒設定 %.2f→%.2f', delay_time, current_time, new_delay)
+            local msg = string.format('%s (%s)', reason_text, delay_info)
+            log_msg('abort', string.format('【%s】', source_set or 'unknown'), spell_name or '', '詠唱不可', msg)
+        end
     end
 end
 

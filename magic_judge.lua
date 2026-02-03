@@ -170,7 +170,7 @@ function magic_judge.check_timeout()
         state.last_result     = "fail"
         state.last_result_src = state.source_set
         
-        -- ③: 詠唱不可後コールバック実行
+        -- ③: 詠唱不可後コールバック実行（必須）
         if state.on_cast_fail_callback then
             -- タイムアウト時のコールバックは必ず実行（pcall でエラーハンドリング）
             local success, err = pcall(state.on_cast_fail_callback, state.spell_name, state.source_set, "timeout")
@@ -178,6 +178,9 @@ function magic_judge.check_timeout()
                 -- エラーが発生してもログに記録
                 windower.add_to_chat(123, '[magic_judge] Callback error (timeout): ' .. tostring(err))
             end
+        else
+            -- コールバックが設定されていない場合は致命的エラー
+            windower.add_to_chat(123, '[magic_judge] CRITICAL: on_cast_fail_callback not set! Delay cannot be applied.')
         end
     end
 end
