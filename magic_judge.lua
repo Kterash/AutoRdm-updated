@@ -8,78 +8,96 @@ local magic_judge = {}
 ------------------------------------------------------------
 
 -- ③ 詠唱完了（成功扱い）
+-- 詠唱が完了した = 魔法が発動した
+-- レジスト、無効、範囲外なども詠唱完了なので成功扱い
 local SUCCESS_CAST = {
-    [2]=true, [7]=true, [24]=true, [25]=true, [26]=true,
-    [82]=true, [83]=true, [93]=true, [113]=true,
-    [230]=true, [236]=true, [237]=true,
-    [263]=true, [264]=true, [265]=true, [276]=true,
-    [357]=true, [358]=true, [367]=true, [587]=true, [588]=true,
-
-    [266]=true, [267]=true, [268]=true, [269]=true, [270]=true,
-    [271]=true, [272]=true, [280]=true,
-
-    [341]=true, [342]=true, [343]=true, [344]=true,
-    [350]=true, [378]=true, [400]=true, [401]=true,
-
-    [570]=true, [571]=true, [572]=true,
-
-    [281]=true, [366]=true, [430]=true, [431]=true,
-    [454]=true, [736]=true,
-
-    [252]=true, [274]=true, [275]=true,
-    [379]=true, [747]=true, [748]=true, [749]=true,
-    [750]=true, [751]=true, [752]=true, [753]=true,
-    [754]=true, [755]=true,
-
-    [284]=true, [653]=true, [654]=true,
-    [655]=true, [656]=true,
-
-    [156]=true, [283]=true, [336]=true, [423]=true, [659]=true,
-
-    [309]=true, [329]=true, [330]=true, [331]=true,
-    [332]=true, [333]=true, [334]=true, [335]=true,
-
-    [382]=true, [383]=true, [384]=true,
-    [385]=true, [386]=true, [387]=true, [388]=true,
-    [389]=true, [390]=true, [391]=true, [392]=true,
-    [393]=true, [394]=true, [395]=true, [396]=true,
-    [397]=true, [398]=true,
-
-    [533]=true, [534]=true,
-
-    [642]=true, [648]=true, [650]=true, [651]=true,
-
-    [652]=true,
-
-    [792]=true,
-
-    [800]=true,
-
-    [802]=true, [803]=true, [804]=true,
-
-    [805]=true, [806]=true,
-
-    [1023]=true,
+    -- "casts ${spell}" メッセージ - 魔法詠唱完了を示す
+    [2]=true,   -- casts spell, damage
+    [7]=true,   -- casts spell, HP recovery
+    [42]=true,  -- casts spell on target
+    [82]=true,  -- casts spell, target is status
+    [83]=true,  -- casts spell, removes status
+    [85]=true,  -- casts spell, resisted (詠唱は完了)
+    [86]=true,  -- casts spell, outside area of effect (詠唱は完了)
+    [93]=true,  -- casts spell, target vanishes
+    [113]=true, -- casts spell, target falls
+    [114]=true, -- casts spell, fails to take effect (詠唱は完了)
+    [227]=true, -- casts spell, HP drained
+    [228]=true, -- casts spell, MP drained
+    [230]=true, -- casts spell, gains status
+    [236]=true, -- casts spell, is status
+    [237]=true, -- casts spell, receives status
+    [252]=true, -- casts spell, Magic Burst damage
+    [268]=true, -- casts spell, Magic Burst status
+    [271]=true, -- casts spell, Magic Burst status
+    [274]=true, -- casts spell, Magic Burst HP drain
+    [275]=true, -- casts spell, Magic Burst MP drain
+    [309]=true, -- casts spell on target
+    [329]=true, -- casts spell, STR drain
+    [330]=true, -- casts spell, DEX drain
+    [331]=true, -- casts spell, VIT drain
+    [332]=true, -- casts spell, AGI drain
+    [333]=true, -- casts spell, INT drain
+    [334]=true, -- casts spell, MND drain
+    [335]=true, -- casts spell, CHR drain
+    [341]=true, -- casts spell, status disappears
+    [342]=true, -- casts spell, status disappears
+    [430]=true, -- casts spell, magic effects drained
+    [431]=true, -- casts spell, TP reduced
+    [432]=true, -- casts spell, Accuracy/Evasion boost
+    [433]=true, -- casts spell, MAB/MDB boost
+    [454]=true, -- casts spell, TP drained
+    [533]=true, -- casts spell, Accuracy drained
+    [534]=true, -- casts spell, Attack drained
+    [570]=true, -- casts spell, status ailments disappear
+    [572]=true, -- casts spell, absorbs status ailments
+    [642]=true, -- casts spell, absorbs status benefits
+    [648]=true, -- leads casting, damage
+    [650]=true, -- leads casting, Magic Burst damage
+    [651]=true, -- leads casting, HP recovery
+    [653]=true, -- casts spell, resisted, Immunobreak (詠唱は完了)
+    [655]=true, -- casts spell, completely resisted (詠唱は完了)
+    
+    -- その他のレジスト・無効メッセージ (詠唱完了だが効果なし)
+    [75]=true,  -- spell has no effect (詠唱は完了)
+    [283]=true, -- No effect on target (詠唱は完了)
+    [284]=true, -- resists the effects (詠唱は完了)
+    [654]=true, -- resists, Immunobreak (詠唱は完了)
+    [656]=true, -- completely resists (詠唱は完了)
 }
 
 -- ① 詠唱不可 / ② 詠唱中断
+-- 詠唱が開始できなかった、または詠唱が中断された
 local FAIL_CAST = {
-    [16]=true, [17]=true, [18]=true, [68]=true, [313]=true,
-
-    [34]=true, [35]=true, [49]=true,
-    [4]=true, [78]=true, [154]=true, [198]=true, [328]=true,
-    [5]=true, [36]=true, [217]=true, [219]=true,
-    [48]=true, [155]=true, [517]=true,
-    [128]=true, [130]=true,
-    [40]=true, [47]=true, [71]=true, [72]=true, [86]=true,
-    [316]=true, [338]=true, [348]=true, [349]=true, [700]=true, [717]=true,
-    [337]=true, [345]=true, [346]=true, [347]=true,
-    [569]=true, [574]=true, [575]=true,
-    [581]=true, [660]=true, [661]=true, [662]=true,
-    [665]=true, [666]=true,
-    [649]=true,
-    [410]=true, [412]=true, [518]=true, [742]=true,
-    [745]=true, [773]=true, [777]=true,
+    -- 詠唱中断
+    [16]=true,  -- casting is interrupted
+    [68]=true,  -- Debug: Casting interrupted
+    
+    -- 詠唱不可 (一般)
+    [17]=true,  -- Unable to cast spells at this time
+    [18]=true,  -- Unable to cast spells at this time
+    [47]=true,  -- cannot cast spell
+    [48]=true,  -- cannot be cast on target
+    [49]=true,  -- unable to cast spells
+    
+    -- MP・ツール不足
+    [34]=true,  -- not enough MP
+    [35]=true,  -- lacks ninja tools
+    
+    -- 範囲・エリア制限
+    [40]=true,  -- cannot use spell in this area
+    [313]=true, -- out of range, unable to cast
+    
+    -- 召喚・ペット関連
+    [338]=true, -- cannot summon avatars
+    [345]=true, -- cannot heal while avatar summoned
+    [348]=true, -- cannot call wyverns
+    [349]=true, -- cannot call beasts
+    [717]=true, -- cannot call alter egos
+    
+    -- 特殊条件
+    [581]=true, -- Unable to cast, Astral Flow required
+    [649]=true, -- cannot cast same spell (party member casting)
 }
 
 ------------------------------------------------------------
