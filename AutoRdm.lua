@@ -2628,8 +2628,11 @@ if magic_judge and magic_judge.state then
         -- ディレイを設定（確実に設定されるように）
         state.special_delay_until = new_delay
         
-        -- ログ出力
-        log_msg('abort', string.format('【%s】', source_set or 'unknown'), spell_name or '', '詠唱不可', string.format('%s (ディレイ%.1f秒設定 %.2f→%.2f)', reason or '', delay_time, current_time, new_delay))
+        -- ログ出力（タイムスタンプ付き）
+        local reason_text = reason or ''
+        local delay_info = string.format('ディレイ%.1f秒設定 %.2f→%.2f', delay_time, current_time, new_delay)
+        local msg = string.format('%s (%s)', reason_text, delay_info)
+        log_msg('abort', string.format('【%s】', source_set or 'unknown'), spell_name or '', '詠唱不可', msg)
     end
 end
 

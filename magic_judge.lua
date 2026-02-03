@@ -158,7 +158,7 @@ function magic_judge.check_timeout()
             local success, err = pcall(state.on_cast_fail_callback, state.spell_name, state.source_set, "timeout")
             if not success then
                 -- エラーが発生してもログに記録
-                windower.add_to_chat(123, '[magic_judge] Callback error: ' .. tostring(err))
+                windower.add_to_chat(123, '[magic_judge] Callback error (timeout): ' .. tostring(err))
             end
         end
     end
