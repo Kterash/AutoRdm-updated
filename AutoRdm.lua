@@ -380,11 +380,11 @@ local state = {
     combatbuff = {
         -- ②: casting フラグを廃止
         last_finish_time = 0,
+        priority         = 5, -- 自動戦闘バフの優先度
 
         pending          = false,
         pending_spell    = nil,
         pending_target   = nil,
-        pending_priority = nil, -- 新規: 予約の優先度
         
         -- combatbuff casting tracking
         active           = false,
@@ -401,25 +401,13 @@ local state = {
     
     -- ⑦: 同一prerender tick内での多重実行を防止するフラグ
     action_started_this_tick = false,
+    
+    -- 現在実行中のアクションの優先度を追跡
+    current_executing_priority = nil,
+    current_executing_type = nil, -- 'special', 'mbset', 'ws', 'buffset', 'combatbuff'
 
     suspend_buffs    = false,
     buff_resume_time = 0,
-
-    retry = {
-        active     = false,
-        spell_name = nil,
-        target     = nil,
-        interval   = 0,
-        next_time  = 0,
-        is_mb      = false,
-        pending    = false,
-        count      = 0,
-        max_count  = 2,
-        spell_id   = nil,
-        kind       = nil,
-        from_queue = false,
-        priority   = nil, -- 新規: リトライ元の優先度
-    },
 
     last_detected_tp_move_id = nil,
     sleep2_initial = false,
@@ -483,12 +471,20 @@ local DELAY_CONFIG = {
 -- ②: 詠唱中判定を magic_judge.state.active に統一
 -- ⑤: 全魔法・WSの実行前に必ず参照
 -- ⑦: 同一prerender tick内での多重実行を防止
+-- 優先度チェック: 実行中の低優先度アクションがあれば、高優先度を許可
 ------------------------------------------------------------
-local function can_start_special()
+local function can_start_special(requesting_priority)
     -- ⑦: 同一prerender tick内での多重実行防止（早期リターンで効率化）
     -- アクションが開始されたら、同じtick内では他のアクションを許可しない
     if state.action_started_this_tick then
         return false, "アクション実行中"
+    end
+    
+    -- 優先度チェック: 現在実行中のアクションより優先度が低い場合は実行不可
+    if state.current_executing_priority and requesting_priority then
+        if requesting_priority > state.current_executing_priority then
+            return false, string.format("優先度%d実行中", state.current_executing_priority)
+        end
     end
     
     -- WS実行中判定
@@ -511,6 +507,47 @@ local function can_start_special()
     end
     
     return true, nil
+end
+
+------------------------------------------------------------
+-- 優先度による割り込み処理
+-- 高優先度のアクションが低優先度を中断する
+------------------------------------------------------------
+local function interrupt_lower_priority(new_priority, new_type)
+    if not state.current_executing_priority then
+        return -- 何も実行中でない
+    end
+    
+    if new_priority >= state.current_executing_priority then
+        return -- 優先度が同じか低いので中断しない
+    end
+    
+    -- 中断処理
+    local current_type = state.current_executing_type
+    log_msg('abort', '【優先度】', current_type or '不明', '中断', string.format('優先度%d が優先度%d を割り込み', new_priority, state.current_executing_priority))
+    
+    if current_type == 'ws' then
+        ws_set_off(true) -- サイレントにOFF
+    elseif current_type == 'mbset' then
+        reset_mbset('優先度割り込み')
+    elseif current_type == 'buffset' then
+        state.buffset.active = false
+        state.buffset.step = 0
+        state.buffset.waiting_for_finish = false
+        state.buffset.next_step_on_finish = 0
+        state.buffset.next_time = 0
+    elseif current_type == 'combatbuff' then
+        state.combatbuff.active = false
+        state.combatbuff.spell_name = nil
+        state.combatbuff.target = nil
+        state.combatbuff.pending = false
+        state.combatbuff.pending_spell = nil
+        state.combatbuff.pending_target = nil
+    end
+    
+    -- 中断後は優先度をクリア
+    state.current_executing_priority = nil
+    state.current_executing_type = nil
 end
 
 ------------------------------------------------------------
@@ -592,45 +629,6 @@ local function enqueue_special_spell(name, recast_id, target, is_sleep2, reason)
 end
 
 ------------------------------------------------------------
--- retry 操作（SP 統合）
-------------------------------------------------------------
-local function reset_retry()
-    local r = state.retry
-    r.active = false
-    r.spell_name = nil
-    r.target = nil
-    r.interval = 0
-    r.next_time = 0
-    r.pending = false
-    r.count = 0
-    r.max_count = 2
-    r.spell_id = nil
-    r.kind = nil
-    r.from_queue = false
-    r.is_mb = false
-    r.priority = nil
-end
-
-local function start_retry(opts)
-    if not opts or not opts.spell_name then return end
-    local t = now()
-    local r = state.retry
-    r.active = true
-    r.spell_name = opts.spell_name
-    r.target = opts.target or '<me>'
-    r.pending = true
-    r.count = 0
-    r.max_count = opts.max_count or 2
-    r.spell_id = opts.spell_id or nil
-    r.interval = opts.interval or 1.0
-    r.next_time = t + r.interval
-    r.kind = opts.kind or nil
-    r.from_queue = opts.from_queue or false
-    r.is_mb = opts.is_mb or false
-    r.priority = opts.priority or 999
-end
-
-------------------------------------------------------------
 -- 味方判定
 ------------------------------------------------------------
 local function is_friendly_actor(id)
@@ -657,10 +655,11 @@ local function cast_spell(spell, target, opts)
     local kind   = opts.kind
     local source = opts.source
     local source_set = opts.source_set or kind or 'unknown'
+    local priority = opts.priority or 999
     local t      = now()
 
-    -- ⑤: 実行前に can_start_special を確認
-    local ok, reason = can_start_special()
+    -- ⑤: 実行前に can_start_special を確認（優先度を渡す）
+    local ok, reason = can_start_special(priority)
     if not ok then
         return false, reason
     end
@@ -686,22 +685,6 @@ local function cast_spell(spell, target, opts)
     
     state.last_spell = spell.name
 
-    -- kind 別の処理（リトライ設定等）
-    if kind == 'special' then
-        if not (state.retry.active and source == 'retry') then
-            start_retry{
-                spell_name = spell.name,
-                target     = target or '<me>',
-                max_count  = opts.max_count or 2,
-                spell_id   = spell.recast_id,
-                interval   = opts.interval or 0.5,
-                kind       = 'special',
-                from_queue = opts.from_queue or false,
-                priority   = opts.priority or 999,
-            }
-        end
-    end
-
     -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
     state.action_started_this_tick = true
     send_cmd(('input /ma "%s" %s'):format(spell.name, target or '<me>'))
@@ -718,8 +701,10 @@ local reset_mbset
 local function start_special_spell(name, recast_id, target, is_sleep2, is_from_queue)
     local p = get_player()
     if not p then return end
+    
+    local sp_priority = SPECIAL_PRIORITY[name] or 999
 
-    local ok, reason = can_start_special()
+    local ok, reason = can_start_special(sp_priority)
     if not ok then
         enqueue_special_spell(name, recast_id, target, is_sleep2, "理由: " .. reason)
         return
@@ -753,63 +738,31 @@ local function start_special_spell(name, recast_id, target, is_sleep2, is_from_q
         return
     end
 
-    if state.retry.active and state.retry.kind == 'special' then
-        return
-    end
-
     if is_any_spell_casting() then
         enqueue_special_spell(name, recast_id, target, is_sleep2, '理由: 他魔法詠唱中')
         return
     end
 
-    -- ①: SP 実行時は WS/BUFFSET だけでなく MB も中断（完全終了）して再開しない
-    if state.ws.active then
-        log_msg('abort', '【WS】', 'WSセット', '中断', 'SP発動のため停止')
-        ws_set_off()
-    end
-    if state.buffset.active then
-        log_msg('abort', '【buff】', '強化セット', '中断', 'SP発動のため停止')
-        state.buffset.active = false
-        state.buffset.step = 0
-        state.buffset.waiting_for_finish = false
-        state.buffset.next_step_on_finish = 0
-        state.buffset.next_time = 0
-    end
-
-    -- ここで MB が進行中なら完全終了（再開しない）
-    if state.mbset and (state.mbset.active or state.mbset.pending_mb1 or state.mbset.mb1_spell or state.mbset.mb2_spell) then
-        -- ①: MB2のタイマーも明示的にクリア
-        state.mbset.mb2_time = 0
-        state.mbset.mb2_release_time = 0
-        reset_mbset('SP発動により中断')
-    end
+    -- 優先度による割り込み処理
+    interrupt_lower_priority(sp_priority, 'special')
 
     state.suspend_buffs = true
-
-    reset_retry()
 
     local t = now()
     state.last_spell = name
 
     state.current_special.name = name
-    state.current_special.priority = SPECIAL_PRIORITY[name] or 999
+    state.current_special.priority = sp_priority
     state.current_special.start_time = now()
     state.current_special.recast_id = recast_id
     state.current_special.target = target
     state.current_special.is_sleep2 = is_sleep2
+    
+    -- 優先度を設定
+    state.current_executing_priority = sp_priority
+    state.current_executing_type = 'special'
 
     log_msg('start', '【SP】', name, '詠唱開始')
-
-    start_retry{
-        spell_name = name,
-        spell_id   = recast_id,
-        target     = target,
-        max_count  = 2,
-        interval   = 0.5,
-        kind       = 'special',
-        from_queue = is_from_queue,
-        priority   = SPECIAL_PRIORITY[name] or 999,
-    }
 
     state.queued_special.name = nil
     state.queued_special.recast_id = nil
@@ -915,14 +868,19 @@ local function process_buffs()
     if state.current_special.name then return end
     if state.buffset.active then return end
     if state.suspend_buffs then return end
+    
+    -- 優先度チェック: より高い優先度のアクションが実行中なら実行しない
+    if state.current_executing_priority and state.current_executing_priority < state.combatbuff.priority then
+        return
+    end
 
     -- ⑥e: 戦闘バフは独自のインターバル 6秒をとる
     if state.combatbuff.last_finish_time > 0 and now() - state.combatbuff.last_finish_time < DELAY_CONFIG.combatbuff_interval then
         return
     end
 
-    -- ⑤: can_start_special を確認
-    local ok, reason = can_start_special()
+    -- ⑤: can_start_special を確認（優先度を渡す）
+    local ok, reason = can_start_special(state.combatbuff.priority)
     if not ok then
         return
     end
@@ -939,10 +897,13 @@ local function process_buffs()
 
             if ni_rc == 0 then
                 state.combatbuff.last_finish_time = now()
+                -- 優先度を設定
+                state.current_executing_priority = state.combatbuff.priority
+                state.current_executing_type = 'combatbuff'
                 local success = cast_spell(spells.utsu_ni, '<me>', {
                     kind = 'combatbuff',
                     source_set = 'combatbuff',
-                    priority = 5
+                    priority = state.combatbuff.priority
                 })
                 if success then
                     log_msg('start', '【auto】', '空蝉:弐', '詠唱開始')
@@ -952,14 +913,19 @@ local function process_buffs()
                     state.combatbuff.active = false
                     state.combatbuff.spell_name = nil
                     state.combatbuff.target = nil
+                    state.current_executing_priority = nil
+                    state.current_executing_type = nil
                 end
                 return
             elseif ichi_rc == 0 then
                 state.combatbuff.last_finish_time = now()
+                -- 優先度を設定
+                state.current_executing_priority = state.combatbuff.priority
+                state.current_executing_type = 'combatbuff'
                 local success = cast_spell(spells.utsu_ichi, '<me>', {
                     kind = 'combatbuff',
                     source_set = 'combatbuff',
-                    priority = 5
+                    priority = state.combatbuff.priority
                 })
                 if success then
                     log_msg('start', '【auto】', '空蝉:壱', '詠唱開始')
@@ -969,6 +935,8 @@ local function process_buffs()
                     state.combatbuff.active = false
                     state.combatbuff.spell_name = nil
                     state.combatbuff.target = nil
+                    state.current_executing_priority = nil
+                    state.current_executing_type = nil
                 end
                 return
             else
@@ -980,10 +948,13 @@ local function process_buffs()
     -- ストンスキン
     if not has_buff(37) and can_cast(spells.stoneskin.recast_id) then
         state.combatbuff.last_finish_time = now()
+        -- 優先度を設定
+        state.current_executing_priority = state.combatbuff.priority
+        state.current_executing_type = 'combatbuff'
         local success = cast_spell(spells.stoneskin, '<me>', {
             kind = 'combatbuff',
             source_set = 'combatbuff',
-            priority = 5
+            priority = state.combatbuff.priority
         })
         if success then
             log_msg('start', '【auto】', 'ストンスキン', '詠唱開始')
@@ -993,6 +964,8 @@ local function process_buffs()
             state.combatbuff.active = false
             state.combatbuff.spell_name = nil
             state.combatbuff.target = nil
+            state.current_executing_priority = nil
+            state.current_executing_type = nil
         end
         return
     end
@@ -1000,10 +973,13 @@ local function process_buffs()
     -- ケアルIV
     if p.vitals.hpp <= 60 and can_cast(spells.cure4.recast_id) then
         state.combatbuff.last_finish_time = now()
+        -- 優先度を設定
+        state.current_executing_priority = state.combatbuff.priority
+        state.current_executing_type = 'combatbuff'
         local success = cast_spell(spells.cure4, '<me>', {
             kind = 'combatbuff',
             source_set = 'combatbuff',
-            priority = 5
+            priority = state.combatbuff.priority
         })
         if success then
             log_msg('start', '【auto】', 'ケアルIV', '詠唱開始')
@@ -1013,6 +989,8 @@ local function process_buffs()
             state.combatbuff.active = false
             state.combatbuff.spell_name = nil
             state.combatbuff.target = nil
+            state.current_executing_priority = nil
+            state.current_executing_type = nil
         end
         return
     end
@@ -1281,12 +1259,15 @@ local function process_ws()
     local w = state.ws
 
     if w.queued_mode and not w.active then
-        local ok, reason = can_start_special()
+        local ok, reason = can_start_special(w.priority)
         if ok then
             reset_ws_for_new_set(w.queued_mode)
             log_msg('start', '【WS】', w.queued_mode, 'WSセット', '開始')
             w.logged_reservation = false
             w.queued_mode = nil
+            -- 優先度を設定
+            state.current_executing_priority = w.priority
+            state.current_executing_type = 'ws'
             return
         else
             if not w.logged_reservation then
@@ -1299,8 +1280,13 @@ local function process_ws()
 
     if not w.active then return end
     if state.current_special.name then return end
+    
+    -- 優先度チェック: より高い優先度のアクションが実行中なら実行しない
+    if state.current_executing_priority and state.current_executing_priority < w.priority then
+        return
+    end
 
-    local ok, reason = can_start_special()
+    local ok, reason = can_start_special(w.priority)
     if not ok then
         return
     end
@@ -1323,7 +1309,7 @@ local function process_ws()
     if phase == 'ws1' then
         if tp < 1000 then return end
         -- ②: WS1実行前に can_start_special() を再確認
-        local ok_ws1, reason_ws1 = can_start_special()
+        local ok_ws1, reason_ws1 = can_start_special(w.priority)
         if not ok_ws1 then
             if not w.retry_wait_logged then
                 log_msg('notice', '【WS】', cfg.ws1, 'WS1実行待機', reason_ws1 or '実行不可')
@@ -1345,7 +1331,7 @@ local function process_ws()
     if phase == 'ws1_retry' then
         if tp < 1000 then return end
         -- ②: WS1リトライ実行前に can_start_special() を再確認
-        local ok_retry, reason_retry = can_start_special()
+        local ok_retry, reason_retry = can_start_special(w.priority)
         if not ok_retry then
             if not w.retry_wait_logged then
                 log_msg('notice', '【WS】', cfg.ws1, 'WS1リトライ待機', reason_retry or '実行不可')
