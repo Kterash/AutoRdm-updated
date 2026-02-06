@@ -1749,7 +1749,7 @@ local function process_mbset_in_prerender(t)
     -- ⑥b-1: MB1の予約があれば実行を試みる
     if m.pending_mb1 and m.mb1_spell then
         if not state.current_special.name then
-            local ok, reason = can_start_special()
+            local ok, reason = can_start_special(m.priority)
             if ok then
                 try_start_mb1(m.mb1_spell, m.mb1_target)
             end
@@ -1779,7 +1779,7 @@ local function process_mbset_in_prerender(t)
         end
         
         -- can_start_special()の判定がOKになるまで待機
-        local ok, reason = can_start_special()
+        local ok, reason = can_start_special(m.priority)
         if ok then
             -- 実行可能になった場合のみMB2を実行
             if m.mb2_spell then
