@@ -536,9 +536,6 @@ local function interrupt_lower_priority(new_priority, new_type)
         state.combatbuff.active = false
         state.combatbuff.spell_name = nil
         state.combatbuff.target = nil
-        state.combatbuff.pending = false
-        state.combatbuff.pending_spell = nil
-        state.combatbuff.pending_target = nil
     end
     
     -- 中断後は優先度をクリア
