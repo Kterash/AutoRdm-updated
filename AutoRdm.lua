@@ -5,7 +5,7 @@
 
 _addon.name     = 'AutoRdm'
 _addon.author   = 'Kazuhiro+Copilot'
-_addon.version  = '5.40'
+_addon.version  = '5.41'
 _addon.commands = {'ardm'}
 
 ------------------------------------------------------------
@@ -385,6 +385,11 @@ local state = {
         pending_spell    = nil,
         pending_target   = nil,
         pending_priority = nil, -- 新規: 予約の優先度
+        
+        -- combatbuff casting tracking
+        active           = false,
+        spell_name       = nil,
+        target           = nil,
     },
 
     buffset_last_finish_time = 0,
@@ -669,6 +674,13 @@ local function cast_spell(spell, target, opts)
     -- これにより同一prerender内で後続の魔法が実行されるのを防ぐ
     state.special_delay_until = now() + DELAY_CONFIG.cast_fail
 
+    -- combatbuff tracking: Set tracking fields before casting
+    if kind == 'combatbuff' then
+        state.combatbuff.active = true
+        state.combatbuff.spell_name = spell.name
+        state.combatbuff.target = target or '<me>'
+    end
+
     -- ②: 全ての魔法を magic_judge でモニタリング開始
     magic_judge.start(spell.name, source_set)
     
@@ -690,41 +702,6 @@ local function cast_spell(spell, target, opts)
         end
     end
 
-    -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
-    state.action_started_this_tick = true
-    send_cmd(('input /ma "%s" %s'):format(spell.name, target or '<me>'))
-    return true
-end
-
-------------------------------------------------------------
--- 戦闘バフ専用 cast_spell
--- ②: combatbuff も magic_judge を通すように変更
--- ⑥e: 優先度 5（自動戦闘バフ）
--- ③: 詠唱不可リスクに備えて送信前にディレイ設定
-------------------------------------------------------------
-local function cast_spell_combatbuff(spell, target)
-    if spell.recast_id and not can_cast(spell.recast_id) then
-        return false
-    end
-
-    -- ⑤: can_start_special を確認
-    local ok, reason = can_start_special()
-    if not ok then
-        state.combatbuff.pending = true
-        state.combatbuff.pending_spell = spell
-        state.combatbuff.pending_target = target or '<me>'
-        state.combatbuff.pending_priority = 5 -- ⑥e: 自動戦闘バフの優先度
-        log_msg('notice', '【auto】', spell.name, '予約')
-        return true
-    end
-
-    -- ③: 詠唱不可リスクに備えて送信前にディレイを設定
-    -- これにより同一prerender内で後続の魔法が実行されるのを防ぐ
-    state.special_delay_until = now() + DELAY_CONFIG.cast_fail
-    
-    -- ②: combatbuff も magic_judge でモニタリング
-    magic_judge.start(spell.name, 'combatbuff')
-    
     -- ⑦: アクション開始フラグを設定（同一tick内での多重実行を防止）
     state.action_started_this_tick = true
     send_cmd(('input /ma "%s" %s'):format(spell.name, target or '<me>'))
@@ -962,18 +939,36 @@ local function process_buffs()
 
             if ni_rc == 0 then
                 state.combatbuff.last_finish_time = now()
-                if cast_spell_combatbuff(spells.utsu_ni, '<me>') then
+                local success = cast_spell(spells.utsu_ni, '<me>', {
+                    kind = 'combatbuff',
+                    source_set = 'combatbuff',
+                    priority = 5
+                })
+                if success then
                     log_msg('start', '【auto】', '空蝉:弐', '詠唱開始')
                 else
                     log_msg('abort', '【auto】', '空蝉:弐', '詠唱不可')
+                    -- Clear tracking fields on failure
+                    state.combatbuff.active = false
+                    state.combatbuff.spell_name = nil
+                    state.combatbuff.target = nil
                 end
                 return
             elseif ichi_rc == 0 then
                 state.combatbuff.last_finish_time = now()
-                if cast_spell_combatbuff(spells.utsu_ichi, '<me>') then
+                local success = cast_spell(spells.utsu_ichi, '<me>', {
+                    kind = 'combatbuff',
+                    source_set = 'combatbuff',
+                    priority = 5
+                })
+                if success then
                     log_msg('start', '【auto】', '空蝉:壱', '詠唱開始')
                 else
                     log_msg('abort', '【auto】', '空蝉:壱', '詠唱不可')
+                    -- Clear tracking fields on failure
+                    state.combatbuff.active = false
+                    state.combatbuff.spell_name = nil
+                    state.combatbuff.target = nil
                 end
                 return
             else
@@ -985,10 +980,19 @@ local function process_buffs()
     -- ストンスキン
     if not has_buff(37) and can_cast(spells.stoneskin.recast_id) then
         state.combatbuff.last_finish_time = now()
-        if cast_spell_combatbuff(spells.stoneskin, '<me>') then
+        local success = cast_spell(spells.stoneskin, '<me>', {
+            kind = 'combatbuff',
+            source_set = 'combatbuff',
+            priority = 5
+        })
+        if success then
             log_msg('start', '【auto】', 'ストンスキン', '詠唱開始')
         else
             log_msg('abort', '【auto】', 'ストンスキン', '詠唱不可')
+            -- Clear tracking fields on failure
+            state.combatbuff.active = false
+            state.combatbuff.spell_name = nil
+            state.combatbuff.target = nil
         end
         return
     end
@@ -996,10 +1000,19 @@ local function process_buffs()
     -- ケアルIV
     if p.vitals.hpp <= 60 and can_cast(spells.cure4.recast_id) then
         state.combatbuff.last_finish_time = now()
-        if cast_spell_combatbuff(spells.cure4, '<me>') then
+        local success = cast_spell(spells.cure4, '<me>', {
+            kind = 'combatbuff',
+            source_set = 'combatbuff',
+            priority = 5
+        })
+        if success then
             log_msg('start', '【auto】', 'ケアルIV', '詠唱開始')
         else
             log_msg('abort', '【auto】', 'ケアルIV', '詠唱不可')
+            -- Clear tracking fields on failure
+            state.combatbuff.active = false
+            state.combatbuff.spell_name = nil
+            state.combatbuff.target = nil
         end
         return
     end
@@ -1813,13 +1826,8 @@ windower.register_event('action', function(act)
         return
     end
 
-    if act.actor_id == p.id and act.category == 6 then
-        -- magic_judge が監視中の場合のみ記録。そうでなければ magic_judge が判定するまで待つ。
-        if magic_judge and magic_judge.state and magic_judge.state.active then
-            log_msg('abort', '【magic】', '魔法', '詠唱中断')
-            state.special_delay_until = now() + DELAY_CONFIG.magic_complete
-        end
-    end
+    -- Category 6 (interruption) is handled by magic_judge through message detection
+    -- AutoRdm should not judge interruptions directly; it receives fail results from magic_judge
 
     if act.actor_id == p.id and act.category == 7 then
         state.ws_motion = true
@@ -2110,16 +2118,6 @@ local function handle_spell_finish(act)
     end
 
     state.last_spell = nil
-
-    -- ⑥e: 戦闘バフ完了後は独自のインターバル6秒をとる
-    -- ②: combatbuff.casting は廃止されているが、判定に magic_judge のsource_setを使用
-    local judge_result = magic_judge.consume_result_for('combatbuff')
-    if judge_result then
-        state.combatbuff.last_finish_time = now()
-        if not state.ws.active then
-            log_msg('finish', '【auto】', name, '詠唱完了')
-        end
-    end
 end
 
 windower.register_event('action', handle_spell_finish)
@@ -2240,6 +2238,27 @@ windower.register_event('prerender', function()
         magic_judge.check_mp()
     end
 
+    -- Consume magic_judge results for combatbuff
+    if state.combatbuff.active then
+        local result = magic_judge.consume_result_for('combatbuff')
+        if result then
+            -- Capture spell_name before clearing state
+            local spell_name = state.combatbuff.spell_name
+            
+            -- Clear tracking fields and set last_finish_time
+            state.combatbuff.active = false
+            state.combatbuff.spell_name = nil
+            state.combatbuff.target = nil
+            state.combatbuff.last_finish_time = now()
+            
+            if result == "success" then
+                log_msg('finish', '【auto】', spell_name, '詠唱完了')
+            elseif result == "fail" then
+                log_msg('abort', '【auto】', spell_name, '詠唱失敗')
+            end
+        end
+    end
+
     -- 戦闘バフ予約実行
     if state.combatbuff.pending and state.combatbuff.pending_spell then
         local ok, reason = can_start_special()
@@ -2250,10 +2269,19 @@ windower.register_event('prerender', function()
             state.combatbuff.pending_spell = nil
             state.combatbuff.pending_target = nil
 
-            if cast_spell_combatbuff(sp, tgt) then
+            local success = cast_spell(sp, tgt, {
+                kind = 'combatbuff',
+                source_set = 'combatbuff',
+                priority = 5
+            })
+            if success then
                 log_msg('report', '【auto】', sp.name, '予約実行')
             else
                 log_msg('abort', '【auto】', sp.name, '予約実行失敗')
+                -- Clear tracking fields on failure
+                state.combatbuff.active = false
+                state.combatbuff.spell_name = nil
+                state.combatbuff.target = nil
             end
         end
     end
@@ -2265,6 +2293,14 @@ windower.register_event('prerender', function()
         magic_judge.state.active = false
         magic_judge.state.last_result = "fail"
         magic_judge.state.last_result_src = magic_judge.state.source_set
+        
+        -- Clear combatbuff state if it was a combatbuff cast
+        if magic_judge.state.source_set == 'combatbuff' and state.combatbuff.active then
+            state.combatbuff.active = false
+            state.combatbuff.spell_name = nil
+            state.combatbuff.target = nil
+        end
+        
         reset_retry()
     end
 
@@ -2595,6 +2631,10 @@ function reset_all_states()
     state.combatbuff.pending_spell = nil
     state.combatbuff.pending_target = nil
     state.combatbuff.pending_priority = nil
+    
+    state.combatbuff.active = false
+    state.combatbuff.spell_name = nil
+    state.combatbuff.target = nil
 
     state.buffset_last_finish_time = 0
 
