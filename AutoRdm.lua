@@ -381,10 +381,6 @@ local state = {
         -- ②: casting フラグを廃止
         last_finish_time = 0,
         priority         = 5, -- 自動戦闘バフの優先度
-
-        pending          = false,
-        pending_spell    = nil,
-        pending_target   = nil,
         
         -- combatbuff casting tracking
         active           = false,
@@ -1575,6 +1571,7 @@ local function try_start_mb1(spell_name, target, opts)
     local t = now()
     state.last_spell = spell_name
 
+    state.mbset.active = true
     state.mbset.mb1_spell = spell_name
     state.mbset.mb1_target = target
     state.mbset.mb1_start_time = now()
@@ -1583,7 +1580,6 @@ local function try_start_mb1(spell_name, target, opts)
     -- 優先度を設定
     state.current_executing_priority = mb_priority
     state.current_executing_type = 'mbset'
-    state.mbset.active = true
 
     -- ③: 詠唱不可リスクに備えて送信前にディレイを設定
     state.special_delay_until = now() + DELAY_CONFIG.cast_fail
@@ -2422,7 +2418,7 @@ windower.register_event('prerender', function()
             
             return
         elseif r == "fail" then
-            -- 失敗時は予約に入れる（リトライ廃止）
+            -- 失敗時はキューに入れる（リトライシステム廃止により予約のみ）
             enqueue_special_spell(
                 state.current_special.name,
                 state.current_special.recast_id,
@@ -2537,10 +2533,6 @@ function reset_all_states()
     state.suspend_buffs = false
     state.buff_resume_time = 0
     state.combatbuff.last_finish_time = 0
-
-    state.combatbuff.pending = false
-    state.combatbuff.pending_spell = nil
-    state.combatbuff.pending_target = nil
     
     state.combatbuff.active = false
     state.combatbuff.spell_name = nil
@@ -2549,6 +2541,10 @@ function reset_all_states()
     state.buffset_last_finish_time = 0
 
     state.first_hit_done = false
+    
+    -- 優先度をクリア
+    state.current_executing_priority = nil
+    state.current_executing_type = nil
 
     -- magic_judge も明示的にリセット（コールバック付き）
     if magic_judge and magic_judge.safe_reset then
