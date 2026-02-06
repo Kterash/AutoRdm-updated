@@ -295,6 +295,18 @@ local function log_msg(category, text, name, event, extra)
 end
 
 ------------------------------------------------------------
+-- 優先度定数 (state定義の前に配置)
+------------------------------------------------------------
+-- アクション優先度定数
+local ACTION_PRIORITY = {
+    COMBATBUFF = 5,  -- 自動戦闘バフ
+    BUFFSET = 4,     -- 強化セット
+    WS = 3,          -- WSセット
+    MBSET = 2,       -- MBセット
+    -- Special Magic は SPECIAL_PRIORITY テーブルで個別管理 (1-5)
+}
+
+------------------------------------------------------------
 -- state（全体状態）
 ------------------------------------------------------------
 local state = {
@@ -460,15 +472,6 @@ local DELAY_CONFIG = {
     combatbuff_interval = 6.0,
     -- MB2発動タイミング (⑥b-2: MB1発動3秒後)
     mb2_after_mb1 = 3.0,
-}
-
--- アクション優先度定数
-local ACTION_PRIORITY = {
-    COMBATBUFF = 5,  -- 自動戦闘バフ
-    BUFFSET = 4,     -- 強化セット
-    WS = 3,          -- WSセット
-    MBSET = 2,       -- MBセット
-    -- Special Magic は SPECIAL_PRIORITY テーブルで個別管理 (1-5)
 }
 
 ------------------------------------------------------------
@@ -2422,7 +2425,7 @@ windower.register_event('prerender', function()
             
             return
         elseif r == "fail" then
-            -- 失敗時はキューに入れる（リトライシステム廃止により予約のみ）
+            -- 失敗時はキューに入れる。リトライシステム廃止により予約のみ
             enqueue_special_spell(
                 state.current_special.name,
                 state.current_special.recast_id,
