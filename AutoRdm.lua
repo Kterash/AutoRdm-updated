@@ -305,7 +305,7 @@ local state = {
 
     ws = {
         active           = false,
-        priority         = 3, -- ①: WSセットの優先度
+        priority         = ACTION_PRIORITY.WS, -- WSセットの優先度
         mode             = nil,
         phase            = 'idle',
         phase_started_at = 0,
@@ -344,7 +344,7 @@ local state = {
 
     buffset = {
         active              = false,
-        priority            = 4, -- ⑥d: 強化セットの優先度
+        priority            = ACTION_PRIORITY.BUFFSET, -- 強化セットの優先度
         step                = 0,
         next_time           = 0,
         waiting_for_finish  = false,
@@ -380,7 +380,7 @@ local state = {
     combatbuff = {
         -- ②: casting フラグを廃止
         last_finish_time = 0,
-        priority         = 5, -- 自動戦闘バフの優先度
+        priority         = ACTION_PRIORITY.COMBATBUFF, -- 自動戦闘バフの優先度
         
         -- combatbuff casting tracking
         active           = false,
@@ -419,7 +419,7 @@ local state = {
 
 state.mbset = {
     active = false,
-    priority = 2, -- MB Set の優先度 (①: スペシャル魔法＞MBセット＞WSセット＞強化セット＞自動戦闘バフ)
+    priority = ACTION_PRIORITY.MBSET, -- MB Set の優先度
     pending_mb1 = false, -- ⑥b-1: MB1のみ予約あり
     mb1_spell = nil,
     mb2_spell = nil,
@@ -462,6 +462,15 @@ local DELAY_CONFIG = {
     mb2_after_mb1 = 3.0,
 }
 
+-- アクション優先度定数
+local ACTION_PRIORITY = {
+    COMBATBUFF = 5,  -- 自動戦闘バフ
+    BUFFSET = 4,     -- 強化セット
+    WS = 3,          -- WSセット
+    MBSET = 2,       -- MBセット
+    -- Special Magic は SPECIAL_PRIORITY テーブルで個別管理 (1-5)
+}
+
 ------------------------------------------------------------
 -- can_start_special（スペシャル実行ロック判定）
 -- ②: 詠唱中判定を magic_judge.state.active に統一
@@ -477,10 +486,8 @@ local function can_start_special(requesting_priority)
     end
     
     -- 優先度チェック: 現在実行中のアクションより優先度が低い場合は実行不可
-    if state.current_executing_priority and requesting_priority then
-        if requesting_priority > state.current_executing_priority then
-            return false, string.format("優先度%d実行中", state.current_executing_priority)
-        end
+    if state.current_executing_priority and requesting_priority and requesting_priority > state.current_executing_priority then
+        return false, string.format("優先度%d実行中", state.current_executing_priority)
     end
     
     -- WS実行中判定
@@ -1574,7 +1581,7 @@ local function try_start_mb1(spell_name, target, opts)
     state.mbset.mb1_start_time = now()
     state.mbset.pending_mb1 = false
     
-    -- 優先度を設定
+    -- 優先度を設定（active設定の直後）
     state.current_executing_priority = mb_priority
     state.current_executing_type = 'mbset'
 
