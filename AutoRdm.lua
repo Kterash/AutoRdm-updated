@@ -2425,15 +2425,10 @@ windower.register_event('prerender', function()
             
             return
         elseif r == "fail" then
-            -- 失敗時はキューに入れる。リトライシステム廃止により予約のみ
-            enqueue_special_spell(
-                state.current_special.name,
-                state.current_special.recast_id,
-                state.current_special.target or '<t>',
-                state.current_special.is_sleep2 or false,
-                '理由: magic_judge fail'
-            )
-
+            -- 予約機能について、予約後の実行で「失敗」となった場合、再びキューに積んで予約するのではなく、
+            -- ①スペシャル魔法は終了する
+            log_msg('abort', '【SP】', state.current_special.name, '失敗', '終了')
+            
             state.current_special.name = nil
             state.current_special.priority = nil
             state.current_special.start_time = nil
@@ -2446,6 +2441,45 @@ windower.register_event('prerender', function()
                 state.current_executing_type = nil
             end
             return
+        end
+    end
+    
+    -- MB セットの成否確認
+    if state.mbset.active then
+        local mb_r = nil
+        if magic_judge and magic_judge.consume_result_for then
+            mb_r = magic_judge.consume_result_for("mbset")
+        end
+        if mb_r == "success" then
+            -- MB1/MB2 の成功は handle_spell_finish で処理される
+            -- ここでは何もしない
+        elseif mb_r == "fail" then
+            -- 予約機能について、予約後の実行で「失敗」となった場合、再びキューに積んで予約するのではなく、
+            -- ③MBセットのMB1は次のMB2のフェーズへ進む
+            local m = state.mbset
+            if m.mb1_spell then
+                -- MB1が失敗した場合
+                log_msg('abort', '【MB】', m.mb1_spell, 'MB1失敗')
+                m.mb1_spell = nil
+                m.pending_mb1 = false
+                
+                -- MB2が設定されている場合はMB2フェーズへ進む
+                if m.mb2_spell then
+                    log_msg('notice', '【MB】', m.mb2_spell, 'MB2フェーズへ移行')
+                    -- MB2時刻を設定（すぐに実行可能にする）
+                    if m.mb2_time == 0 then
+                        m.mb2_time = now()
+                    end
+                    m.awaiting_mb2 = true
+                else
+                    -- MB2がない場合はMBセットを終了
+                    reset_mbset('MB1失敗; MB2なし')
+                end
+            elseif m.mb2_spell then
+                -- MB2が失敗した場合
+                log_msg('abort', '【MB】', m.mb2_spell, 'MB2失敗')
+                reset_mbset('MB2失敗')
+            end
         end
     end
 
