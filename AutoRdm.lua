@@ -2165,6 +2165,41 @@ end
 windower.register_event('prerender', function()
     local t = now()
 
+    -- ③: magic_judge と ws_judge のタイムアウトチェックを最優先で実行
+    -- どんな条件でも、これだけは必ず実行されるようにする（鉄壁のタイムアウト）
+    if ws_judge and ws_judge.state and ws_judge.check_timeout then 
+        ws_judge.check_timeout() 
+    end
+    if magic_judge and magic_judge.state and magic_judge.check_timeout then 
+        magic_judge.check_timeout() 
+    end
+    
+    -- ③: タイムアウト後のディレイ設定を保証（第三の安全装置：最終防衛線）
+    -- magic_judge が fail 判定を出したのにディレイが設定されていない場合は強制設定
+    -- 重要：last_resultは消費せず、通常のretryロジックで処理できるようにする
+    if magic_judge and magic_judge.state then
+        local mjs = magic_judge.state
+        if mjs.last_result == "fail" and mjs.last_result_src then
+            -- 失敗判定が出ているが、ディレイが未来に設定されていない場合
+            -- かつ、まだ緊急処理を実行していない場合のみ
+            if state.special_delay_until <= t then
+                -- この失敗結果に対して既に緊急処理を行ったかチェック
+                -- mjs.emergency_delay_applied が現在の source_set と一致していなければ未処理
+                if mjs.emergency_delay_applied ~= mjs.last_result_src then
+                    -- 緊急でディレイを設定
+                    state.special_delay_until = t + (DELAY_CONFIG and DELAY_CONFIG.cast_fail or 3.0)
+                    windower.add_to_chat(123, '[AutoRdm] Emergency delay set after magic_judge failure')
+                    
+                    -- このsource_setに対して緊急処理済みとマーク（繰り返し防止）
+                    mjs.emergency_delay_applied = mjs.last_result_src
+                end
+            end
+        else
+            -- last_resultがクリアされたら緊急処理フラグもクリア
+            mjs.emergency_delay_applied = nil
+        end
+    end
+
     if not state.enabled then return end
     local p = get_player()
     if not p or p.main_job_id ~= JOB_RDM then return end
@@ -2389,8 +2424,7 @@ windower.register_event('prerender', function()
         state.buffset.next_time = 0
     end
 
-    if ws_judge and ws_judge.state and ws_judge.check_timeout then ws_judge.check_timeout() end
-    if magic_judge and magic_judge.state and magic_judge.check_timeout then magic_judge.check_timeout() end
+    -- ③: タイムアウトチェックは prerender の最初に移動済み（鉄壁のタイムアウト）
 
     -- スペシャル魔法の成否確認
     if state.current_special.name then
@@ -2608,18 +2642,27 @@ end
 if magic_judge and magic_judge.state then
     magic_judge.state.on_cast_fail_callback = function(spell_name, source_set, reason)
         -- ③: 詠唱不可後ディレイを設定し、can_start_special に含める
-        local delay_time = DELAY_CONFIG.cast_fail
-        local current_time = now()
+        -- このコールバックは可能な限り成功を保証する（第一の安全装置）
+        
+        -- 安全なデフォルト値を使用
+        local delay_time = (DELAY_CONFIG and DELAY_CONFIG.cast_fail) or 3.0
+        local current_time = (now and now()) or os.clock()  -- now() も os.clock() を返すため一貫性あり
         local new_delay = current_time + delay_time
         
         -- ディレイを設定（確実に設定されるように）
-        state.special_delay_until = new_delay
+        if state then
+            state.special_delay_until = new_delay
+        else
+            windower.add_to_chat(123, '[magic_judge] CRITICAL: state not available, cannot set delay!')
+        end
         
         -- ログ出力（タイムスタンプ付き）
-        local reason_text = reason or ''
-        local delay_info = string.format('ディレイ%.1f秒設定 %.2f→%.2f', delay_time, current_time, new_delay)
-        local msg = string.format('%s (%s)', reason_text, delay_info)
-        log_msg('abort', string.format('【%s】', source_set or 'unknown'), spell_name or '', '詠唱不可', msg)
+        if log_msg then
+            local reason_text = reason or ''
+            local delay_info = string.format('ディレイ%.1f秒設定 %.2f→%.2f', delay_time, current_time, new_delay)
+            local msg = string.format('%s (%s)', reason_text, delay_info)
+            log_msg('abort', string.format('【%s】', source_set or 'unknown'), spell_name or '', '詠唱不可', msg)
+        end
     end
 end
 
